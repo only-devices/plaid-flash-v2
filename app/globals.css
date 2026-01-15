@@ -1140,7 +1140,7 @@ body {
 }
 
 .product-card.has-icon .product-card-name {
-  text-align: right;
+  text-align: left;
 }
 
 .product-card:hover .product-card-icon {
@@ -1788,9 +1788,9 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 /* Settings Modal */
 .settings-modal {
   color: #ffffff;
-  max-width: 600px;
+  max-width: 95%;
   margin: 0 auto;
-  padding: 20px;
+  padding: 12px;
 }
 
 .settings-header {
@@ -1930,6 +1930,34 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   border: 1px solid rgba(255, 255, 255, 0.1);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+}
+
+/* Info Row (non-interactive display) */
+.settings-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-info-label {
+  font-size: 18px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.settings-info-value {
+  font-size: 14px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: rgba(136, 192, 208, 0.9);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 450px;
 }
 
 .settings-toggle-row:hover:not(:has(.settings-toggle.disabled)) {
@@ -2273,3 +2301,346 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   }
 }
 
+
+/* Webhook Panel Styles */
+
+/* When webhook panel is visible, shift top panels up */
+body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
+  top: 32%;
+  transform: translate(calc(-50% - 40px), -50%);
+  height: 540px;
+  min-height: 340px;
+  max-height: 540px;
+}
+
+body:has(.webhook-panel-container) .callback-modal-container {
+  top: 32%;
+  transform: translate(calc(50% + 40px), -50%);
+  height: 540px;
+  min-height: 340px;
+  max-height: 540px;
+}
+
+body:has(.webhook-panel-container) .callback-modal-container > div {
+  height: 100%;
+  min-height: unset;
+}
+
+body:has(.webhook-panel-container) .event-logs-modal {
+  height: 100%;
+  min-height: unset;
+}
+
+body:has(.webhook-panel-container) .callback-modal-container .account-data {
+  max-height: 330px;
+}
+
+body:has(.webhook-panel-container) .event-logs-scroll {
+  max-height: 350px;
+}
+
+/* Webhook panel - width matches both top panels + gap */
+.webhook-panel-container {
+  position: fixed;
+  left: 50%;
+  top: 70%;
+  transform: translate(-50%, -50%);
+  /* Width = 2 panels (40vw - 60px each) + 80px gap */
+  width: calc(80vw - 40px);
+  max-width: 1880px;
+  z-index: 999;
+  opacity: 0;
+  animation: slideUp 0.5s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 20px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+.webhook-panel {
+  background: rgba(26, 26, 46, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 24px;
+  padding: 24px 32px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  height: 380px;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+}
+
+.webhook-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #ffffff;
+}
+
+.webhook-panel-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.webhook-count {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.webhook-panel-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.webhook-copy-button {
+  position: absolute;
+  top: 18px;
+  right: 12px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  color: #88c0d0;
+}
+
+.webhook-copy-button:hover {
+  background: rgba(102, 126, 234, 0.25);
+  border-color: rgba(102, 126, 234, 0.5);
+  transform: scale(1.05);
+}
+
+.webhook-copy-button:active {
+  transform: scale(0.95);
+}
+
+.webhook-copy-button.copied {
+  background: rgba(163, 190, 140, 0.25);
+  border-color: rgba(163, 190, 140, 0.5);
+  color: #a3be8c;
+  animation: copyConfirm 0.3s ease;
+}
+
+.webhook-copy-button svg {
+  display: block;
+}
+
+.webhook-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
+  border-radius: 12px;
+  padding-top: 8px;
+  padding-right: 0px;
+}
+
+.webhook-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.webhook-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+}
+
+.webhook-scroll::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 10px;
+}
+
+.webhook-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
+}
+
+.webhook-item {
+  padding: 12px 16px;
+  margin: 0;
+  transition: background-color 0.2s ease;
+  border-radius: 8px;
+}
+
+.webhook-item.even {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.webhook-item.odd {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.webhook-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.webhook-type {
+  background: linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+.webhook-code {
+  color: #88c0d0;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+}
+
+.webhook-time {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+}
+
+.webhook-payload {
+  margin-top: 8px;
+}
+
+.webhook-payload .json-container {
+  position: static;
+}
+
+.webhook-payload .code-block {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.webhook-placeholder {
+  padding: 24px 20px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.webhook-placeholder .code-block {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+@media (max-width: 1400px) {
+  .webhook-panel-container {
+    width: calc(90vw - 20px);
+  }
+  
+  body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
+    transform: translate(calc(-50% - 30px), -50%);
+  }
+  
+  body:has(.webhook-panel-container) .callback-modal-container {
+    transform: translate(calc(50% + 30px), -50%);
+  }
+}
+
+@media (max-width: 1024px) {
+  .webhook-panel-container {
+    width: calc(95vw - 10px);
+  }
+  
+  .webhook-panel {
+    padding: 20px 24px;
+    height: 240px;
+    max-height: 240px;
+  }
+  
+  body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
+    transform: translate(calc(-50% - 20px), -50%);
+    height: 300px;
+    min-height: 300px;
+    max-height: 300px;
+  }
+  
+  body:has(.webhook-panel-container) .callback-modal-container {
+    transform: translate(calc(50% + 20px), -50%);
+    height: 300px;
+    min-height: 300px;
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 768px) {
+  .webhook-panel-container {
+    width: 95%;
+    max-width: 500px;
+    top: auto;
+    bottom: 10px;
+    transform: translateX(-50%);
+  }
+  
+  .webhook-panel {
+    padding: 16px 20px;
+    height: 200px;
+    max-height: 200px;
+  }
+}
+
+/* Embedded Link Styles */
+.embedded-link-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 1001;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.embedded-link-container {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.95);
+  width: 900px;
+  height: 700px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  z-index: 1002;
+  opacity: 0;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+}
+
+.embedded-link-container.ready {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}

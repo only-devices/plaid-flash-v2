@@ -10,6 +10,7 @@ import JsonHighlight from '@/components/JsonHighlight';
 import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
+import WebhookPanel from '@/components/WebhookPanel';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById } from '@/lib/productConfig';
 
 export default function Home() {
@@ -19,10 +20,12 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [showChildModal, setShowChildModal] = useState(false);
+  const [showGrandchildModal, setShowGrandchildModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
+  const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [modalState, setModalState] = useState<'loading' | 'preview-config' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -50,7 +53,15 @@ export default function Home() {
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
   const [tempDemoMode, setTempDemoMode] = useState(false);
-  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode;
+  const [useLegacyUserToken, setUseLegacyUserToken] = useState(false);
+  const [tempUseLegacyUserToken, setTempUseLegacyUserToken] = useState(false);
+  const [useAltCredentials, setUseAltCredentials] = useState(false);
+  const [tempUseAltCredentials, setTempUseAltCredentials] = useState(false);
+  const [altCredentialsAvailable, setAltCredentialsAvailable] = useState(false);
+  const [usedAltCredentials, setUsedAltCredentials] = useState<boolean>(false); // Track which credentials were used for this session
+  const [rememberedUserExperience, setRememberedUserExperience] = useState(false);
+  const [tempRememberedUserExperience, setTempRememberedUserExperience] = useState(false);
+  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || rememberedUserExperience;
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   
   // Demo Mode state
@@ -59,6 +70,27 @@ export default function Home() {
   const [showDemoProductsModal, setShowDemoProductsModal] = useState(false);
   const [demoProductsVisibility, setDemoProductsVisibility] = useState<Record<string, boolean>>({});
   const [isDemoModeStarting, setIsDemoModeStarting] = useState(false);
+
+  // CRA Mode state
+  const [userCreateConfig, setUserCreateConfig] = useState<any>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userToken, setUserToken] = useState<string | null>(null);
+  const [usedUserToken, setUsedUserToken] = useState<boolean>(false); // Track which param was used for Link Token
+  const [isEditingUserCreateConfig, setIsEditingUserCreateConfig] = useState(false);
+  const [editedUserCreateConfig, setEditedUserCreateConfig] = useState('');
+  const [userCreateConfigError, setUserCreateConfigError] = useState<string | null>(null);
+
+  // Webhook state
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [showWebhookPanel, setShowWebhookPanel] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+
+  // Embedded Link state
+  const [embeddedLinkActive, setEmbeddedLinkActive] = useState(false);
+  const [embeddedInstitutionSelected, setEmbeddedInstitutionSelected] = useState(false);
+  const [embeddedLinkReady, setEmbeddedLinkReady] = useState(false);
+  const embeddedContainerRef = useRef<HTMLDivElement>(null);
+  const embeddedLinkHandlerRef = useRef<any>(null);
 
   // Initialize all products as visible for Demo Mode
   const initializeProductVisibility = () => {
@@ -109,6 +141,76 @@ export default function Home() {
     }
   }, [linkEvents]);
 
+  // SSE connection for real-time webhook updates
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+
+    // Fetch webhook URL on mount
+    const initWebhooks = async () => {
+      try {
+        const response = await fetch('/api/webhook-url');
+        const data = await response.json();
+        if (data.webhookUrl) {
+          setWebhookUrl(data.webhookUrl);
+          console.log('Webhook URL:', data.webhookUrl);
+        } else if (data.message) {
+          console.log('Webhook status:', data.message);
+        }
+      } catch (error) {
+        console.error('Error fetching webhook URL:', error);
+      }
+
+      // Check if alternative credentials are available
+      try {
+        const response = await fetch('/api/alt-credentials-check');
+        const data = await response.json();
+        setAltCredentialsAvailable(data.available || false);
+      } catch (error) {
+        console.error('Error checking alt credentials:', error);
+      }
+
+      // Connect to SSE stream for webhook updates
+      try {
+        eventSource = new EventSource('/api/webhooks-stream');
+        
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'connected') {
+              // Initial connection - load existing webhooks
+              if (data.webhooks && data.webhooks.length > 0) {
+                setWebhooks(data.webhooks);
+              }
+            } else if (data.type === 'heartbeat') {
+              // Heartbeat - ignore
+            } else {
+              // New webhook received
+              setWebhooks(prev => [data, ...prev]);
+            }
+          } catch (error) {
+            console.error('Error parsing SSE data:', error);
+          }
+        };
+
+        eventSource.onerror = (error) => {
+          console.error('SSE connection error:', error);
+          // EventSource will automatically try to reconnect
+        };
+      } catch (error) {
+        console.error('Error connecting to SSE:', error);
+      }
+    };
+
+    initWebhooks();
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, []);
+
   const fetchLinkToken = async (productId: string) => {
     try {
       const productConfig = getProductConfigById(productId);
@@ -125,6 +227,9 @@ export default function Home() {
       if (productConfig.additionalLinkParams) {
         Object.assign(requestBody, productConfig.additionalLinkParams);
       }
+
+      // Add useAltCredentials flag
+      requestBody.useAltCredentials = usedAltCredentials || useAltCredentials;
 
       const response = await fetch('/api/create-link-token', {
         method: 'POST',
@@ -175,6 +280,7 @@ export default function Home() {
       // Direct product
       setSelectedProduct(productId);
       setSelectedChildProduct(null);
+      setSelectedGrandchildProduct(null);
       setShowProductModal(false);
       
       // If in Demo Mode with Link completed, call API directly
@@ -188,15 +294,41 @@ export default function Home() {
   };
 
   const handleChildProductSelect = (childId: string) => {
-    setSelectedChildProduct(childId);
-    setShowChildModal(false);
+    // Get the child config to check if it has grandchildren
+    const parentConfig = PRODUCT_CONFIGS[selectedProduct!];
+    const childConfig = parentConfig?.children?.find(c => c.id === childId);
+    
+    // If child has grandchildren (3rd level), show grandchild modal
+    if (childConfig?.children && childConfig.children.length > 0) {
+      setSelectedChildProduct(childId);
+      setShowChildModal(false);
+      setShowGrandchildModal(true);
+    } else {
+      // No grandchildren - this is a leaf product
+      setSelectedChildProduct(childId);
+      setSelectedGrandchildProduct(null);
+      setShowChildModal(false);
+      
+      // If in Demo Mode with Link completed, call API directly
+      if (demoLinkCompleted) {
+        handleDemoModeApiCall(childId);
+      } else {
+        // Normal mode: show preview modal
+        showLinkConfigPreview(childId);
+      }
+    }
+  };
+
+  const handleGrandchildProductSelect = (grandchildId: string) => {
+    setSelectedGrandchildProduct(grandchildId);
+    setShowGrandchildModal(false);
     
     // If in Demo Mode with Link completed, call API directly
     if (demoLinkCompleted) {
-      handleDemoModeApiCall(childId);
+      handleDemoModeApiCall(grandchildId);
     } else {
       // Normal mode: show preview modal
-      showLinkConfigPreview(childId);
+      showLinkConfigPreview(grandchildId);
     }
   };
 
@@ -206,13 +338,18 @@ export default function Home() {
       return;
     }
 
+    // For CRA products, show user create modal first
+    if (productConfig.isCRA) {
+      showUserCreatePreview(productId);
+      return;
+    }
+
     // Build the FULL configuration that will be sent to Plaid
     const fullConfig: any = {
       link_customization_name: 'flash',
-      user: {
-        client_user_id: 'flash_user_id01',
-        phone_number: '+14155550011'
-      },
+      user: rememberedUserExperience 
+        ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
+        : { client_user_id: 'flash_user_id01' },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
@@ -240,6 +377,231 @@ export default function Home() {
     }
   };
 
+  const showUserCreatePreview = (productId: string) => {
+    const productConfig = getProductConfigById(productId);
+    if (!productConfig) {
+      return;
+    }
+
+    // Build the /user/create configuration based on legacy toggle
+    let userConfig: any;
+    
+    if (useLegacyUserToken) {
+      // Legacy format using consumer_report_user_identity
+      userConfig = {
+        client_user_id: 'flash_cra_user_' + Date.now(),
+        consumer_report_user_identity: {
+          first_name: 'Flash',
+          last_name: 'User',
+          ssn_last_4: '1234',
+          date_of_birth: '1970-01-01',
+          phone_numbers: ['+14155550011'],
+          emails: ['email@example.com'],
+          primary_address: {
+            city: 'Greenville',
+            region: 'SC',
+            street: '650 N Academy St',
+            postal_code: '29601',
+            country: 'US'
+          }
+        }
+      };
+    } else {
+      // New format using identity object
+      userConfig = {
+        client_user_id: 'flash_cra_user_' + Date.now(),
+        identity: {
+          name: {
+            given_name: 'Test',
+            family_name: 'User'
+          },
+          date_of_birth: '1970-01-31',
+          emails: [
+            { data: 'test@email.com', primary: true }
+          ],
+          phone_numbers: [
+            { data: '+14155550011', primary: true }
+          ],
+          addresses: [
+            {
+              street_1: '100 Grey St',
+              city: 'San Francisco',
+              region: 'CA',
+              country: 'US',
+              postal_code: '94109',
+              primary: true
+            }
+          ],
+          id_numbers: [
+            { value: '1234', type: 'us_ssn_last_4' }
+          ]
+        }
+      };
+    }
+
+    setUserCreateConfig(userConfig);
+    setModalState('preview-user-create');
+    setShowModal(true);
+  };
+
+  const handleProceedWithUserCreate = async (configOverride?: any) => {
+    // User approved the /user/create config, now call the API
+    setModalState('processing-user-create');
+
+    try {
+      const configToUse = configOverride || userCreateConfig;
+      
+      console.log('[Frontend] Creating user with useAltCredentials:', useAltCredentials);
+      
+      const response = await fetch('/api/user-create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...configToUse,
+          useLegacyUserToken,
+          useAltCredentials
+        }),
+      });
+      
+      const data = await response.json();
+      
+      // Check for API errors
+      if (response.status >= 400) {
+        setErrorData(data);
+        setApiStatusCode(response.status);
+        setModalState('api-error');
+        return;
+      }
+      
+      // Remember which credentials were used for this session
+      setUsedAltCredentials(useAltCredentials);
+      
+      // Store the user_id or user_token from the response
+      const newUserId = data.user_id || null;
+      const newUserToken = data.user_token || null;
+      
+      // When using legacy mode (user_token), clear user_id and vice versa
+      // to ensure only one parameter is available for subsequent calls
+      if (useLegacyUserToken) {
+        // Legacy mode: only store user_token
+        setUserId(null);
+        setUserToken(newUserToken);
+      } else {
+        // New mode: only store user_id
+        setUserId(newUserId);
+        setUserToken(null);
+      }
+      
+      // Now show the link token config preview - pass values directly since state update is async
+      showCRALinkConfigPreview(newUserId, newUserToken);
+    } catch (error: any) {
+      console.error('Error creating user:', error);
+      setErrorMessage('Failed to create user. Please try again.');
+      setModalState('error');
+      
+      // Reset after a delay
+      setTimeout(() => {
+        setShowModal(false);
+        setModalState('loading');
+        setShowProductModal(true);
+      }, 3000);
+    }
+  };
+
+  const showCRALinkConfigPreview = (userIdParam?: string | null, userTokenParam?: string | null) => {
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = getProductConfigById(effectiveProductId!);
+    if (!productConfig) {
+      return;
+    }
+
+    // Use passed params or fall back to state (for cases where state is already set)
+    const effectiveUserId = userIdParam ?? userId;
+    const effectiveUserToken = userTokenParam ?? userToken;
+
+    // Build the FULL configuration for CRA products
+    const fullConfig: any = {
+      link_customization_name: 'flash',
+      user: { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01', phone_number: '+14155550011' },
+      client_name: 'Plaid Flash',
+      products: productConfig.products,
+      country_codes: ['US'],
+      language: 'en'
+    };
+
+    // Add user_id or user_token based on legacy toggle
+    // When legacy toggle is enabled, prioritize user_token over user_id
+    if (useLegacyUserToken && effectiveUserToken) {
+      fullConfig.user_token = effectiveUserToken;
+      setUsedUserToken(true); // Remember we used user_token
+    } else if (effectiveUserId) {
+      fullConfig.user_id = effectiveUserId;
+      setUsedUserToken(false); // Remember we used user_id
+    } else if (effectiveUserToken) {
+      fullConfig.user_token = effectiveUserToken;
+      setUsedUserToken(true); // Remember we used user_token
+    }
+
+    // Add required_if_supported_products if not empty
+    if (productConfig.required_if_supported && productConfig.required_if_supported.length > 0) {
+      fullConfig.required_if_supported_products = productConfig.required_if_supported;
+    }
+
+    // Add additional link params if they exist
+    if (productConfig.additionalLinkParams) {
+      Object.assign(fullConfig, productConfig.additionalLinkParams);
+    }
+
+    // Add webhook URL for products that require it
+    if (productConfig.requiresWebhook && webhookUrl) {
+      fullConfig.webhook = webhookUrl;
+    }
+
+    setLinkTokenConfig(fullConfig);
+    setModalState('preview-config');
+  };
+
+  const handleGoBackToUserCreate = () => {
+    // Go back to user create preview
+    setModalState('preview-user-create');
+    setIsEditingConfig(false);
+    setConfigError(null);
+  };
+
+  const handleToggleUserCreateEditMode = () => {
+    if (!isEditingUserCreateConfig) {
+      // Entering edit mode - populate editedUserCreateConfig with current config
+      setEditedUserCreateConfig(JSON.stringify(userCreateConfig, null, 2));
+      setUserCreateConfigError(null);
+    }
+    setIsEditingUserCreateConfig(!isEditingUserCreateConfig);
+  };
+
+  const handleCancelUserCreateEdit = () => {
+    setIsEditingUserCreateConfig(false);
+    setUserCreateConfigError(null);
+    setEditedUserCreateConfig('');
+  };
+
+  const handleSaveAndProceedUserCreate = async () => {
+    try {
+      // Validate JSON first
+      const parsed = JSON.parse(editedUserCreateConfig);
+      
+      // Update config and reset edit state
+      setUserCreateConfig(parsed);
+      setUserCreateConfigError(null);
+      setIsEditingUserCreateConfig(false);
+      
+      // Proceed with user creation
+      handleProceedWithUserCreate(parsed);
+    } catch (error: any) {
+      setUserCreateConfigError(`Invalid JSON: ${error.message}`);
+    }
+  };
+
   const handleProceedWithConfig = async (configOverride?: any) => {
     // User approved the config, now fetch the link token using the (potentially edited) linkTokenConfig
     // In Zap Mode, configOverride is passed directly to avoid state timing issues
@@ -261,7 +623,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(configToUse),
+        body: JSON.stringify({ ...configToUse, useAltCredentials: usedAltCredentials || useAltCredentials }),
       });
       
       const data = await response.json();
@@ -306,12 +668,17 @@ export default function Home() {
       setIsDemoModeStarting(false);
     }
     
-    // If we came from child selection, go back to child modal
-    // Otherwise go back to parent product modal
-    if (selectedChildProduct) {
+    // Navigate back through the 3-level hierarchy
+    if (selectedGrandchildProduct) {
+      // Go back from grandchild to child modal
+      setSelectedGrandchildProduct(null);
+      setShowGrandchildModal(true);
+    } else if (selectedChildProduct) {
+      // Go back from child to parent modal
       setSelectedChildProduct(null);
       setShowChildModal(true);
     } else {
+      // Go back to root product modal
       setSelectedProduct(null);
       setShowProductModal(true);
     }
@@ -365,7 +732,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(parsed),
+          body: JSON.stringify({ ...parsed, useAltCredentials: usedAltCredentials || useAltCredentials }),
         });
         
         const data = await response.json();
@@ -407,6 +774,8 @@ export default function Home() {
     setTempEmbeddedMode(embeddedMode);
     setTempLayerMode(layerMode);
     setTempDemoMode(demoMode);
+    setTempUseLegacyUserToken(useLegacyUserToken);
+    setTempUseAltCredentials(useAltCredentials);
     // Hide product modal and show settings modal
     setShowProductModal(false);
     setShowChildModal(false);
@@ -433,6 +802,9 @@ export default function Home() {
     setEmbeddedMode(tempEmbeddedMode);
     setLayerMode(tempLayerMode);
     setDemoMode(tempDemoMode);
+    setUseLegacyUserToken(tempUseLegacyUserToken);
+    setUseAltCredentials(tempUseAltCredentials);
+    setRememberedUserExperience(tempRememberedUserExperience);
     
     // Close settings modal
     setShowSettingsModal(false);
@@ -461,10 +833,11 @@ export default function Home() {
   };
 
   const handleToggleEmbedded = () => {
-    // Disabled for now, but handler exists
-    if (!true) { // Will enable later
-      setTempEmbeddedMode(!tempEmbeddedMode);
-    }
+    setTempEmbeddedMode(!tempEmbeddedMode);
+  };
+
+  const handleToggleRememberedUser = () => {
+    setTempRememberedUserExperience(!tempRememberedUserExperience);
   };
 
   const handleToggleLayer = () => {
@@ -481,6 +854,14 @@ export default function Home() {
     if (newValue) {
       setTempZapMode(false);
     }
+  };
+
+  const handleToggleLegacyUserToken = () => {
+    setTempUseLegacyUserToken(!tempUseLegacyUserToken);
+  };
+
+  const handleToggleAltCredentials = () => {
+    setTempUseAltCredentials(!tempUseAltCredentials);
   };
 
   const handleToggleDemoProduct = (productId: string) => {
@@ -566,7 +947,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ public_token }),
+        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
       });
       
       if (!exchangeResponse.ok) {
@@ -582,7 +963,7 @@ export default function Home() {
       setAccessToken(access_token);
 
       // Get the effective product ID (child if selected, otherwise parent)
-      const effectiveProductId = selectedChildProduct || selectedProduct;
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
 
       // Skip accounts/get for Signal Balance
@@ -621,7 +1002,7 @@ export default function Home() {
       }
 
       // Build request body with access token and any additional params
-      const requestBody: any = { access_token };
+      const requestBody: any = { access_token, useAltCredentials: usedAltCredentials || useAltCredentials };
       if (productConfig.additionalApiParams) {
         Object.assign(requestBody, productConfig.additionalApiParams);
       }
@@ -675,8 +1056,14 @@ export default function Home() {
         public_token,
         metadata
       });
+      // Show webhook panel only for products that require webhooks (CRA products)
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      if (productConfig?.requiresWebhook) {
+        setShowWebhookPanel(true);
+      }
     }
-  }, [zapMode, demoMode, handleZapModeSuccess]);
+  }, [zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct]);
 
   const handleProceedWithSuccess = async () => {
     // Start fade-out animation for both modals
@@ -690,7 +1077,81 @@ export default function Home() {
     setShowModal(false);
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
+    setShowWebhookPanel(false);
+
+    // Get the effective product ID to check product type
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = getProductConfigById(effectiveProductId!);
     
+    // Check if this is a CRA product
+    if (productConfig?.isCRA) {
+      // CRA products: skip access_token exchange, call product endpoint directly with user_id/user_token
+      setModalState('processing-product');
+      setShowModal(true);
+
+      try {
+        if (!productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+
+        // Build request body with user_id or user_token
+        // Use the same parameter that was used for Link Token creation
+        const requestBody: any = {
+          useAltCredentials: usedAltCredentials || useAltCredentials
+        };
+        if (usedUserToken && userToken) {
+          requestBody.user_token = userToken;
+        } else if (userId) {
+          requestBody.user_id = userId;
+        } else if (userToken) {
+          requestBody.user_token = userToken;
+        }
+        
+        if (productConfig.additionalApiParams) {
+          Object.assign(requestBody, productConfig.additionalApiParams);
+        }
+        
+        const productResponse = await fetch(productConfig.apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        const productData = await productResponse.json();
+        
+        // Check for API errors
+        if (productResponse.status >= 400) {
+          setErrorData(productData);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        
+        setProductData(productData);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+      } catch (error) {
+        console.error('Error fetching CRA product data:', error);
+        setErrorMessage('We encountered an issue fetching CRA data. Please try again.');
+        setModalState('error');
+        
+        // Reset after a delay
+        setTimeout(() => {
+          setShowModal(false);
+          setCallbackData(null);
+          setProductData(null);
+          setModalState('loading');
+          setShowButton(true);
+          setShowWelcome(false);
+          setShowProductModal(true);
+        }, 3000);
+      }
+      return;
+    }
+    
+    // Non-CRA products: proceed with normal flow
     // Show processing state for accounts
     setModalState('processing-accounts');
     setShowModal(true);
@@ -704,7 +1165,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ public_token }),
+        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
       });
       
       if (!exchangeResponse.ok) {
@@ -729,8 +1190,6 @@ export default function Home() {
         return;
       }
 
-      // Get the effective product ID to check if we should skip accounts/get
-      const effectiveProductId = selectedChildProduct || selectedProduct;
       const skipAccountsGet = effectiveProductId === 'signal-balance';
 
       if (skipAccountsGet) {
@@ -820,7 +1279,7 @@ export default function Home() {
 
     try {
       // Get the effective product ID (child if selected, otherwise parent)
-      const effectiveProductId = selectedChildProduct || selectedProduct;
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       
       if (!productConfig || !productConfig.apiEndpoint) {
@@ -880,6 +1339,7 @@ export default function Home() {
     setAccountsData(null);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
     
     // Hide success modal and show product selector
     setShowModal(false);
@@ -989,7 +1449,15 @@ export default function Home() {
       err: err || null,
       metadata
     });
-  }, [zapMode]);
+    // Show webhook panel only for products that require webhooks (CRA products), except in Zap mode
+    if (!zapMode) {
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      if (productConfig?.requiresWebhook) {
+        setShowWebhookPanel(true);
+      }
+    }
+  }, [zapMode, selectedChildProduct, selectedProduct]);
 
   const onEvent = useCallback((eventName: string, metadata: any) => {
     // Add event to the logs
@@ -1021,12 +1489,23 @@ export default function Home() {
     setModalState('loading');
     setShowButton(true);
     setShowWelcome(false);
+    setShowWebhookPanel(false);
     // Clear link token and selected products to prevent auto-opening
     setLinkToken(null);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
     setLinkEvents([]);
     setShowProductModal(true);
+
+    // Reset embedded Link state
+    setEmbeddedLinkActive(false);
+    setEmbeddedInstitutionSelected(false);
+    setEmbeddedLinkReady(false);
+    if (embeddedLinkHandlerRef.current?.destroy) {
+      embeddedLinkHandlerRef.current.destroy();
+      embeddedLinkHandlerRef.current = null;
+    }
   };
 
   const config = {
@@ -1038,12 +1517,112 @@ export default function Home() {
 
   const { open, ready } = usePlaidLink(config);
 
+  // Open embedded Link - just shows the container, the useEffect below handles initialization
+  const openEmbeddedLink = useCallback(() => {
+    if (!linkToken) return;
+    // Show the embedded container - the useEffect will handle initialization
+    setEmbeddedLinkActive(true);
+  }, [linkToken]);
+
+  // Initialize embedded Link when container becomes available
+  useEffect(() => {
+    if (!embeddedLinkActive || !linkToken) return;
+    
+    // Don't reinitialize if already initialized
+    if (embeddedLinkHandlerRef.current) return;
+
+    // Wait for next frame to ensure DOM is updated and ref is populated
+    const timeoutId = setTimeout(() => {
+      console.log('[Embedded] Attempting to initialize...');
+      
+      if (!embeddedContainerRef.current) {
+        console.error('[Embedded] Container ref not available');
+        return;
+      }
+      console.log('[Embedded] Container ref available:', embeddedContainerRef.current);
+
+      const Plaid = (window as any).Plaid;
+      console.log('[Embedded] Plaid SDK:', Plaid);
+      console.log('[Embedded] Plaid.createEmbedded:', Plaid?.createEmbedded);
+      
+      if (!Plaid || !Plaid.createEmbedded) {
+        console.error('[Embedded] Plaid.createEmbedded is not available');
+        return;
+      }
+
+      console.log('[Embedded] Calling Plaid.createEmbedded with token:', linkToken?.substring(0, 20) + '...');
+      
+      embeddedLinkHandlerRef.current = Plaid.createEmbedded({
+        token: linkToken,
+        onSuccess: (public_token: string, metadata: any) => {
+          console.log('[Embedded] onSuccess fired');
+          // Clean up and hide container
+          setEmbeddedLinkActive(false);
+          setEmbeddedInstitutionSelected(false);
+          setEmbeddedLinkReady(false);
+          if (embeddedLinkHandlerRef.current?.destroy) {
+            embeddedLinkHandlerRef.current.destroy();
+            embeddedLinkHandlerRef.current = null;
+          }
+          onSuccess(public_token, metadata);
+        },
+        onExit: (err: any, metadata: any) => {
+          console.log('[Embedded] onExit fired', err);
+          // Clean up and hide container
+          setEmbeddedLinkActive(false);
+          setEmbeddedInstitutionSelected(false);
+          setEmbeddedLinkReady(false);
+          if (embeddedLinkHandlerRef.current?.destroy) {
+            embeddedLinkHandlerRef.current.destroy();
+            embeddedLinkHandlerRef.current = null;
+          }
+          onExit(err, metadata);
+        },
+        onEvent: (eventName: string, metadata: any) => {
+          console.log('[Embedded] onEvent fired:', eventName, metadata);
+          // When institution is selected, hide overlay and let Link continue
+          if (eventName === 'SELECT_INSTITUTION') {
+            setEmbeddedInstitutionSelected(true);
+          }
+          onEvent(eventName, metadata);
+        },
+      }, embeddedContainerRef.current);
+      
+      console.log('[Embedded] createEmbedded returned:', embeddedLinkHandlerRef.current);
+      
+      // Wait for the Plaid Link iframe to load before showing the container
+      if (embeddedLinkHandlerRef.current && embeddedContainerRef.current) {
+        const checkForIframe = () => {
+          const iframe = embeddedContainerRef.current?.querySelector('iframe[title="Plaid Link"]');
+          if (iframe) {
+            console.log('[Embedded] Found iframe, waiting for load...');
+            iframe.addEventListener('load', () => {
+              console.log('[Embedded] Iframe loaded, showing container');
+              setEmbeddedLinkReady(true);
+            }, { once: true });
+            // Fallback in case load already fired
+            if ((iframe as HTMLIFrameElement).contentDocument?.readyState === 'complete') {
+              console.log('[Embedded] Iframe already loaded');
+              setEmbeddedLinkReady(true);
+            }
+          } else {
+            // Iframe not found yet, check again
+            setTimeout(checkForIframe, 50);
+          }
+        };
+        checkForIframe();
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [embeddedLinkActive, linkToken, onSuccess, onExit, onEvent]);
+
   // Auto-open Link when ready after product selection
   useEffect(() => {
     // In Demo Mode, we can open Link without a selected product
     // In normal mode, we need a selected product
-    const shouldOpenLink = ready && linkToken && !showModal && !showChildModal && !showProductModal && !showZapResetButton && 
-      (demoMode || selectedProduct || selectedChildProduct);
+    const shouldOpenLink = ready && linkToken && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
+      (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
       // Clear previous events and show event logs (unless in Zap Mode)
@@ -1052,9 +1631,16 @@ export default function Home() {
         setShowEventLogs(true);
       }
       setShowProductModal(false); // Ensure product modal is hidden
-      open();
+      
+      if (embeddedMode) {
+        // Use embedded Link
+        openEmbeddedLink();
+      } else {
+        // Use regular Link
+        open();
+      }
     }
-  }, [ready, linkToken, selectedProduct, selectedChildProduct, showModal, showChildModal, showProductModal, showZapResetButton, zapMode, demoMode, open]);
+  }, [ready, linkToken, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showChildModal, showGrandchildModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
 
   const handleButtonClick = () => {
     // Show product selection modal instead of opening Link directly
@@ -1096,10 +1682,9 @@ export default function Home() {
     // Create Link token config with dynamically built products
     const demoConfig = {
       link_customization_name: 'flash',
-      user: {
-        client_user_id: 'flash_user_id01',
-        phone_number: '+14155550011'
-      },
+      user: rememberedUserExperience
+        ? { client_user_id: 'flash_user_id01' }
+        : { client_user_id: 'flash_user_id01', phone_number: '+14155550011' },
       client_name: 'Plaid Flash',
       products,
       transactions: {
@@ -1122,6 +1707,7 @@ export default function Home() {
     // Hide product selector modals first
     setShowProductModal(false);
     setShowChildModal(false);
+    setShowGrandchildModal(false);
     
     // Clean up Plaid item if access token exists
     if (accessToken || demoAccessToken) {
@@ -1151,6 +1737,7 @@ export default function Home() {
     setAccessToken(null);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
     setLinkToken(null);
     setLinkEvents([]);
     setShowEventLogs(false);
@@ -1167,6 +1754,27 @@ export default function Home() {
     setDemoAccessToken(null);
     setShowDemoProductsModal(false);
     setDemoProductsVisibility({});
+    
+    // Reset CRA state
+    setUserCreateConfig(null);
+    setUserId(null);
+    setUserToken(null);
+    setIsEditingUserCreateConfig(false);
+    setEditedUserCreateConfig('');
+    setUserCreateConfigError(null);
+    
+    // Reset webhook panel (but keep SSE connection open)
+    setShowWebhookPanel(false);
+    setWebhooks([]);
+
+    // Reset embedded Link state
+    setEmbeddedLinkActive(false);
+    setEmbeddedInstitutionSelected(false);
+    setEmbeddedLinkReady(false);
+    if (embeddedLinkHandlerRef.current?.destroy) {
+      embeddedLinkHandlerRef.current.destroy();
+      embeddedLinkHandlerRef.current = null;
+    }
   };
 
   const handleZapReset = async () => {
@@ -1198,6 +1806,7 @@ export default function Home() {
     setAccessToken(null);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
     setLinkToken(null);
     setLinkEvents([]);
     setShowEventLogs(false);
@@ -1206,6 +1815,15 @@ export default function Home() {
     setShowButton(false);
     setShowWelcome(false);
     setShowProductModal(true);
+
+    // Reset embedded Link state
+    setEmbeddedLinkActive(false);
+    setEmbeddedInstitutionSelected(false);
+    setEmbeddedLinkReady(false);
+    if (embeddedLinkHandlerRef.current?.destroy) {
+      embeddedLinkHandlerRef.current.destroy();
+      embeddedLinkHandlerRef.current = null;
+    }
   };
 
   const handleCopyAccessToken = async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1248,11 +1866,91 @@ export default function Home() {
   };
 
   const renderModalContent = () => {
-    if (modalState === 'preview-config' && linkTokenConfig) {
+    // CRA: User Create Preview Modal
+    if (modalState === 'preview-user-create' && userCreateConfig) {
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      const isCRA = productConfig?.isCRA;
+      
       return (
         <div className="modal-success">
           <div className="success-header">
-            <h2>Here&apos;s the /link/token/create configuration that will be used:</h2>
+            <h2>Step 1: Here&apos;s the /user/create configuration:</h2>
+          </div>
+          {!isEditingUserCreateConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button 
+                  className="config-edit-icon" 
+                  onClick={handleToggleUserCreateEditMode}
+                  title="Edit configuration"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <JsonHighlight data={userCreateConfig} />
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleGoBackToProducts} />
+                <ArrowButton variant="blue" onClick={() => handleProceedWithUserCreate()} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedUserCreateConfig}
+                  language="json"
+                  onChange={(e) => setEditedUserCreateConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '12px',
+                    minHeight: '400px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {userCreateConfigError && (
+                  <div className="config-error">
+                    {userCreateConfigError}
+                  </div>
+                )}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelUserCreateEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveAndProceedUserCreate} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    if (modalState === 'processing-user-create') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Creating user...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'preview-config' && linkTokenConfig) {
+      // Check if this is a CRA product to modify the back button behavior
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      const isCRA = productConfig?.isCRA;
+      
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>{isCRA ? 'Step 2: ' : ''}Here&apos;s the /link/token/create configuration that will be used:</h2>
           </div>
           {!isEditingConfig ? (
             <>
@@ -1270,8 +1968,8 @@ export default function Home() {
                 <JsonHighlight data={linkTokenConfig} />
               </div>
               <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={handleGoBackToProducts} />
-                <ArrowButton variant="blue" onClick={() => handleProceedWithConfig()} />
+                <ArrowButton variant="red" direction="back" onClick={isCRA ? handleGoBackToUserCreate : handleGoBackToProducts} />
+                <ArrowButton variant="blue" onClick={() => handleProceedWithConfig(linkTokenConfig)} />
               </div>
             </>
           ) : (
@@ -1300,7 +1998,7 @@ export default function Home() {
                 )}
               </div>
               <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={handleCancelEdit} />
+                <ArrowButton variant="red" direction="back" onClick={isCRA ? handleCancelEdit : handleCancelEdit} />
                 <ArrowButton variant="blue" onClick={handleSaveAndProceed} />
               </div>
             </>
@@ -1366,7 +2064,7 @@ export default function Home() {
     }
 
     if (modalState === 'accounts-data' && accountsData) {
-      const effectiveProductId = selectedChildProduct || selectedProduct;
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       const productName = productConfig?.name || 'Product';
       
@@ -1409,7 +2107,7 @@ export default function Home() {
     }
 
     if (modalState === 'processing-product') {
-      const effectiveProductId = selectedChildProduct || selectedProduct;
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       const productName = productConfig?.name || 'Product';
       
@@ -1462,9 +2160,10 @@ export default function Home() {
     }
 
     if (modalState === 'success' && productData) {
-      const effectiveProductId = selectedChildProduct || selectedProduct;
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       const apiTitle = productConfig?.apiTitle || 'API Response';
+      const isCRA = productConfig?.isCRA;
       
       return (
         <div className="modal-success">
@@ -1483,7 +2182,12 @@ export default function Home() {
             <JsonHighlight 
               data={productData} 
               highlightKeys={productConfig?.highlightKeys}
-              expandableCopy={{
+              expandableCopy={isCRA ? {
+                responseData: productData,
+                userId: userId,
+                userToken: userToken,
+                isCRA: true
+              } : {
                 responseData: productData,
                 accessToken: accessToken || demoAccessToken
               }}
@@ -1555,6 +2259,30 @@ export default function Home() {
           />
         )}
       </Modal>
+      <Modal isVisible={showGrandchildModal}>
+        {selectedProduct && selectedChildProduct && (() => {
+          const parentConfig = PRODUCT_CONFIGS[selectedProduct];
+          const childConfig = parentConfig?.children?.find(c => c.id === selectedChildProduct);
+          return childConfig?.children && (
+            <ProductSelector 
+              products={demoLinkCompleted 
+                ? childConfig.children.filter(gc => demoProductsVisibility[gc.id])
+                : childConfig.children} 
+              onSelect={handleGrandchildProductSelect}
+              onBack={() => {
+                setShowGrandchildModal(false);
+                setSelectedGrandchildProduct(null);
+                setShowChildModal(true);
+              }}
+              showBackButton={true}
+              onSettingsClick={demoLinkCompleted ? undefined : handleOpenSettings}
+              hasCustomSettings={hasCustomSettings}
+              title={childConfig.name}
+              onResetClick={demoLinkCompleted ? handleStartOver : undefined}
+            />
+          );
+        })()}
+      </Modal>
       <Modal isVisible={showSettingsModal}>
         <div className="settings-modal">
           <div className="settings-header">
@@ -1577,7 +2305,13 @@ export default function Home() {
               label="Embedded Mode" 
               checked={tempEmbeddedMode} 
               onChange={handleToggleEmbedded} 
-              disabled={true} 
+              disabled={false}
+            />
+            <SettingsToggle 
+              label="Remembered User Experience" 
+              checked={tempRememberedUserExperience} 
+              onChange={handleToggleRememberedUser} 
+              disabled={false}
             />
             <SettingsToggle 
               label="Layer" 
@@ -1585,6 +2319,25 @@ export default function Home() {
               onChange={handleToggleLayer} 
               disabled={true}
             />
+            <SettingsToggle 
+              label="CRA: Use Legacy user_token" 
+              checked={tempUseLegacyUserToken} 
+              onChange={handleToggleLegacyUserToken}
+              disabled={false}
+            />
+            <SettingsToggle 
+              label="Use Alternative Credentials" 
+              checked={tempUseAltCredentials} 
+              onChange={handleToggleAltCredentials}
+              disabled={!altCredentialsAvailable}
+              tooltip={!altCredentialsAvailable ? 'Set ALT_PLAID_CLIENT_ID and ALT_PLAID_SECRET in .env' : undefined}
+            />
+            <div className="settings-info-row">
+              <span className="settings-info-label">Webhook URL</span>
+              <span className="settings-info-value">
+                {webhookUrl ? webhookUrl : 'Not active'}
+              </span>
+            </div>
           </div>
           <div className="button-row">
             <button className="action-button button-red" onClick={handleCancelSettings}>
@@ -1648,6 +2401,14 @@ export default function Home() {
       <Modal isVisible={showModal && !(showEventLogs && (modalState === 'callback-success' || modalState === 'callback-exit'))}>
         {renderModalContent()}
       </Modal>
+
+      {/* Embedded Link Container - Shows when embedded mode is active, hidden after institution selection */}
+      {embeddedLinkActive && !embeddedInstitutionSelected && (
+        <>
+          <div className="embedded-link-overlay" />
+          <div className={`embedded-link-container ${embeddedLinkReady ? 'ready' : ''}`} ref={embeddedContainerRef} />
+        </>
+      )}
       
       {/* Event Logs Modal - Shows side by side with Plaid Link */}
       <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''}`}>
@@ -1748,7 +2509,7 @@ export default function Home() {
                 <div className="success-icon">✓</div>
                 <h2>
                   {(() => {
-                        const effectiveProductId = selectedChildProduct || selectedProduct;
+                        const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
                         const productConfig = getProductConfigById(effectiveProductId!);
                         return productConfig?.apiTitle || productConfig?.name || 'Product API';
                       })()} Response
@@ -1763,7 +2524,7 @@ export default function Home() {
                 <JsonHighlight 
                   data={productData} 
                   highlightKeys={(() => {
-                    const effectiveProductId = selectedChildProduct || selectedProduct;
+                    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
                     const productConfig = getProductConfigById(effectiveProductId!);
                     return productConfig?.highlightKeys;
                   })()}
@@ -1784,6 +2545,9 @@ export default function Home() {
           Woah. Do That Again.
         </button>
       )}
+
+      {/* Webhook Panel - Shows after onSuccess/onExit callbacks */}
+      <WebhookPanel webhooks={webhooks} visible={showWebhookPanel} />
     </div>
   );
 }

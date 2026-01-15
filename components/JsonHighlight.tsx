@@ -6,7 +6,10 @@ interface JsonHighlightProps {
   showCopyButton?: boolean;
   expandableCopy?: {
     responseData: any;
-    accessToken: string | null;
+    accessToken?: string | null;
+    userId?: string | null;
+    userToken?: string | null;
+    isCRA?: boolean;
   };
 }
 
@@ -34,7 +37,7 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
     }
   };
 
-  const handleExpandableCopy = async (type: 'response' | 'accessToken') => {
+  const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken') => {
     if (!expandableCopy) return;
     
     try {
@@ -42,6 +45,10 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
         await navigator.clipboard.writeText(JSON.stringify(expandableCopy.responseData, null, 2));
       } else if (type === 'accessToken' && expandableCopy.accessToken) {
         await navigator.clipboard.writeText(expandableCopy.accessToken);
+      } else if (type === 'userId' && expandableCopy.userId) {
+        await navigator.clipboard.writeText(expandableCopy.userId);
+      } else if (type === 'userToken' && expandableCopy.userToken) {
+        await navigator.clipboard.writeText(expandableCopy.userToken);
       }
       
       // Show success state
@@ -215,13 +222,36 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
             >
               Response
             </button>
-            <button 
-              className="expandable-pill-button"
-              onClick={() => handleExpandableCopy('accessToken')}
-              disabled={!expandableCopy.accessToken}
-            >
-              Access Token
-            </button>
+            {expandableCopy.isCRA ? (
+              // CRA products: show user_id and/or user_token buttons
+              <>
+                {expandableCopy.userId && (
+                  <button 
+                    className="expandable-pill-button"
+                    onClick={() => handleExpandableCopy('userId')}
+                  >
+                    user_id
+                  </button>
+                )}
+                {expandableCopy.userToken && (
+                  <button 
+                    className="expandable-pill-button"
+                    onClick={() => handleExpandableCopy('userToken')}
+                  >
+                    user_token
+                  </button>
+                )}
+              </>
+            ) : (
+              // Non-CRA products: show access token button
+              <button 
+                className="expandable-pill-button"
+                onClick={() => handleExpandableCopy('accessToken')}
+                disabled={!expandableCopy.accessToken}
+              >
+                Access Token
+              </button>
+            )}
           </div>
           <button 
             className={`json-copy-button expandable-icon ${copied ? 'copied' : ''}`}

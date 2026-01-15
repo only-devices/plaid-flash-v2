@@ -6,13 +6,8 @@ services:
     container_name: plaid-flash
     ports:
       - "3000:3000"
-    environment:
-      # Plaid API Configuration
-      # See README.md for more details
-      - PLAID_CLIENT_ID=your_client_id_here
-      - PLAID_SECRET=your_sandbox_secret_here
-      - PLAID_ENV=sandbox
+    env_file:
+      - .env
     restart: unless-stopped
     labels:
       com.plaid-flash.description: "Plaid Flash - Test Plaid Link, in a Flash"
-

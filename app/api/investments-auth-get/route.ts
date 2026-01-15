@@ -5,13 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { access_token, useAltCredentials } = await request.json();
 
-    if (!access_token) {
-      return NextResponse.json(
-        { error: 'access_token is required' },
-        { status: 400 }
-      );
-    }
-
     // Select credentials based on flag
     const clientId = useAltCredentials && process.env.ALT_PLAID_CLIENT_ID 
       ? process.env.ALT_PLAID_CLIENT_ID 
@@ -30,27 +23,27 @@ export async function POST(request: NextRequest) {
 
     const plaid = new PlaidApi(configuration);
 
-    const response = await plaid.accountsGet({
+    const response = await plaid.investmentsAuthGet({
       access_token: access_token,
     });
 
+    // Note: plaid-fetch returns data directly (no .data property)
     return NextResponse.json(response);
   } catch (error: any) {
-    console.error('Error fetching accounts:', error);
+    console.error('Error getting investments auth data:', error);
     
     // If it's a Plaid error with a response, return the Plaid error details
     if (error.response) {
       const errorBody = await error.response.json().catch(() => ({ 
-        error: error.message || 'Failed to fetch accounts' 
+        error: error.message || 'Failed to get investments auth data' 
       }));
       return NextResponse.json(errorBody, { status: error.response.status });
     }
     
     // Otherwise return generic error
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch accounts' },
+      { error: error.message || 'Failed to get investments auth data' },
       { status: 500 }
     );
   }
 }
-

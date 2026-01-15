@@ -1,131 +1,143 @@
 # Plaid Flash
 
-A lightweight Next.js application for connecting bank accounts using Plaid Link in sandbox mode. Built with Next.js 16 App Router, TypeScript, and the edge-compatible `plaid-fetch` library.
+A lightweight Next.js application for testing Plaid integrations in sandbox mode. Built with Next.js 16 App Router, TypeScript, and designed to run in Docker for consistent development environments.
 
 ## ✨ Features
 
 - 🚀 Quick Plaid Link integration with sandbox mode
-- 🎨 Smooth modal animations and modern UI
-- 📊 Pretty-printed JSON display of account data
-- ⚡ Edge Runtime compatible with Vercel
+- 🎨 Modern UI with smooth animations
+- 📊 Real-time JSON display of API responses
 - 🔒 Secure token exchange flow
 - 📱 Responsive design for mobile and desktop
-- 🎓 Educational tool showing Plaid Link callbacks in real-time
+- 🎓 Educational tool showing Plaid callbacks and API flows
+- 🌐 Ngrok webhook tunnel support for localhost testing
+- 🔄 CRA product support with legacy user_token compatibility
+- 🔑 Alternative credentials toggle for multi-account testing
 
 ## 🎬 Flow
 
 1. Welcome animation fades in
-2. "Let's Go" button appears
-3. Select a Product, accept Link Token configuration → Plaid Link opens
-4. **Link succeeds**: Shows `onSuccess` callback data → Click → Exchange token → Display account data
-5. **Link exits**: Shows `onExit` callback data → Click to try again
+2. Select a Product from the catalog
+3. Configure settings (optional: webhooks, legacy mode, alt credentials)
+4. **Create CRA User** (for CRA products): Configure and create a Plaid user
+5. **Review Link Token Config**: Preview the configuration before launching Link
+6. **Plaid Link Modal**: Complete the authentication flow
+7. **Success**: View callback data and fetch product endpoint results
+8. **Webhooks** (optional): Monitor real-time webhook events in the sidebar
 
-## 📋 Prerequisites
+## 🐳 Quick Start
 
-- Node.js 18+ or higher
-- npm or pnpm
-- Plaid account with API credentials ([Get started here](https://dashboard.plaid.com/signup))
-
-## 🐳 Docker Quick Start (Recommended)
-
-**No Node.js installation required!** Run the app using Docker in just 3 steps:
+Run the app using Docker - no Node.js installation required!
 
 ### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
-  - `brew install --cask docker-desktop` to install both using Homebrew on a Mac, then open and configure the Docker Desktop app using the default/recommended settings
-- Plaid account with API credentials ([Get started here](https://dashboard.plaid.com/signup))
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- Install on Mac: `brew install --cask docker-desktop`
+- Plaid account with API credentials ([Sign up here](https://dashboard.plaid.com/signup))
+- A Plaid Link customization entitled "flash"
 
 ### Step 1: Get Plaid Credentials
 
-1. Sign up for a free Plaid account at https://dashboard.plaid.com/signup
-2. Navigate to Team Settings → Keys
-3. Copy your:
-   - Client ID
-   - Sandbox secret key
+1. Sign up at [dashboard.plaid.com/signup](https://dashboard.plaid.com/signup)
+2. Navigate to **Team Settings → Keys**
+3. Copy your **Client ID** and **Sandbox secret**
 
-### Step 2: Configure Environment Variables
+### Step 2: Configure Environment
 
-Edit the `docker-compose.yml` file and replace the placeholder values:
+Create a `.env` file from the template:
 
-```yaml
-environment:
-  - PLAID_CLIENT_ID=your_actual_client_id_here
-  - PLAID_SECRET=your_actual_sandbox_secret_here
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your credentials:
+
+```bash
+# App Environment
+NODE_ENV=development
+
+# Plaid API Configuration
+PLAID_CLIENT_ID=your_client_id_here
+PLAID_SECRET=your_sandbox_secret_here
+PLAID_ENV=sandbox
+
+# Alternative Plaid Credentials (Optional)
+# For testing with multiple Plaid accounts
+ALT_PLAID_CLIENT_ID=
+ALT_PLAID_SECRET=
+
+# Ngrok Webhook Tunnel (required for CRA and Transactions)
+# Get your free token at: https://dashboard.ngrok.com/get-started/your-authtoken
+NGROK_AUTHTOKEN=
 ```
 
 ### Step 3: Run with Docker Compose
 
 ```bash
 # Build and start the container
-docker-compose up
+docker compose up --build
 
 # Or run in detached mode (background)
-docker-compose up -d
+docker compose up -d
 ```
 
-That's it! Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Docker Commands
 
 ```bash
 # Stop the container
-docker-compose down
+docker compose down
 
 # Rebuild after code changes
-docker-compose up --build
+docker compose up --build
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
-# Stop and remove everything (including volumes)
-docker-compose down -v
-```
-
-### Alternative: Using Docker directly (without Compose)
-
-```bash
-# Build the image
-docker build -t plaid-flash .
-
-# Run the container
-docker run -p 3000:3000 \
-  -e PLAID_CLIENT_ID=your_client_id_here \
-  -e PLAID_SECRET=your_sandbox_secret_here \
-  -e PLAID_ENV=sandbox \
-  plaid-flash
+# Stop and remove everything
+docker compose down -v
 ```
 
 ### Docker Benefits
 
-✅ No Node.js installation required
-✅ Consistent environment across all machines
-✅ Isolated dependencies
-✅ Production-optimized build (~150-200MB image)
-✅ Easy cleanup and removal
+✅ No Node.js installation required  
+✅ Consistent development environment  
+✅ Runs in true development mode with hot reload  
+✅ Includes all dev dependencies (ngrok SDK)  
+✅ Easy cleanup and removal  
 
-### Docker Troubleshooting
+## ⚙️ Configuration Options
 
-**Port already in use:**
+### Ngrok Webhook Tunnel
+
+Enable webhook testing on localhost:
+
+1. Sign up at [ngrok.com](https://ngrok.com)
+2. Get your authtoken from [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+3. Add to `.env`: `NGROK_AUTHTOKEN=your_token_here`
+4. Restart the container
+
+The tunnel starts automatically and provides a public URL for webhook testing.
+
+### Alternative Credentials
+
+Test with multiple Plaid accounts by adding ALT credentials to `.env`:
+
 ```bash
-# Change the port in docker-compose.yml
-ports:
-  - "3001:3000"  # Use port 3001 on host instead
+ALT_PLAID_CLIENT_ID=your_second_client_id
+ALT_PLAID_SECRET=your_second_secret
 ```
 
-**Container won't start:**
-```bash
-# Check logs
-docker-compose logs
+Toggle between accounts in **Settings** without restarting.
 
-# Ensure environment variables are set correctly
-docker-compose config
-```
+### CRA Legacy Mode
 
-**Need to rebuild after changes:**
-```bash
-docker-compose down
-docker-compose up --build
-```
+For Consumer Report (CRA) products, toggle between:
+- **New mode** (default): Uses `user_id` with `identity` object
+- **Legacy mode**: Uses `user_token` with `consumer_report_user_identity` object
+
+Access in **Settings** before creating a user.
+
 ## 📁 Project Structure
 
 ```
@@ -134,22 +146,27 @@ plaid-flash/
 │   ├── layout.tsx              # Root layout
 │   ├── page.tsx                # Main page (client component)
 │   ├── globals.css             # Global styles
-│   └── api/
-│       ├── create-link-token/
-│       │   └── route.ts        # POST /api/create-link-token
-│       ├── exchange-public-token/
-│       │   └── route.ts        # POST /api/exchange-public-token
-│       └── auth-get/
-│           └── route.ts        # POST /api/auth-get
+│   └── api/                    # API routes
+│       ├── create-link-token/  # Link token creation
+│       ├── user-create/        # CRA user creation
+│       ├── exchange-public-token/ # Token exchange
+│       ├── cra-*/              # CRA product endpoints
+│       ├── webhook/            # Webhook receiver
+│       └── ...                 # Product endpoints
 ├── components/
-│   ├── LinkButton.tsx          # Pill-shaped launch button
-│   └── Modal.tsx               # Animated modal component
-├── .env.local                  # Environment variables (create this)
-├── .env.local.example          # Example env file
-├── next.config.js              # Next.js configuration
-├── package.json                # Dependencies
-├── tsconfig.json               # TypeScript configuration
-└── vercel.json                 # Vercel deployment config
+│   ├── LinkButton.tsx          # Launch button
+│   ├── Modal.tsx               # Modal component
+│   ├── ProductSelector.tsx     # Product catalog
+│   ├── SettingsToggle.tsx      # Settings controls
+│   └── WebhookPanel.tsx        # Webhook display
+├── lib/
+│   ├── ngrokManager.ts         # Ngrok tunnel management
+│   ├── productConfig.ts        # Product definitions
+│   └── webhookStore.ts         # Webhook state management
+├── .env.example                # Environment template
+├── docker-compose.yml          # Docker configuration
+├── Dockerfile                  # Docker build instructions
+└── package.json                # Dependencies
 ```
 
 ## 🛠 Technologies
@@ -158,44 +175,39 @@ plaid-flash/
 - **Next.js 16** - React framework with App Router
 - **TypeScript** - Type safety
 - **react-plaid-link** - Official Plaid Link React hook
-- **CSS3** - Animations and styling
+- **CSS3** - Animations and modern styling
 
 ### Backend
-- **Next.js API Routes** - Serverless API endpoints
-- **plaid-fetch** - Edge-compatible Plaid API client ([heysanil/plaid-fetch](https://github.com/heysanil/plaid-fetch))
-
-## 🎓 Educational Purpose
-
-Plaid Flash visualizes the Plaid Link integration flow:
-
-1. **Link Token Creation**: See how link tokens are generated server-side
-2. **Plaid Link Modal**: Experience the actual Link flow
-3. **Callback Inspection**: View `onSuccess` and `onExit` callback data before processing
-4. **Token Exchange**: Understand the public → access token flow
-5. **API Response**: Inspect the `/auth/get` response data
-
-Perfect for learning, demoing, or debugging Plaid integrations!
+- **Next.js API Routes** - Serverless endpoints
+- **plaid-fetch** - Edge-compatible Plaid client
+- **@ngrok/ngrok** - Webhook tunnel SDK
 
 ## 🧪 Sandbox Test Credentials
 
-Plaid provides various test users for different scenarios: https://plaid.com/docs/sandbox/test-credentials/
+Plaid provides test users for different scenarios:
+
+- Username: `user_good` / Password: `pass_good` - Successful auth
+- Username: `user_bad` / Password: `pass_good` - Invalid credentials
+- [Full list of test credentials](https://plaid.com/docs/sandbox/test-credentials/)
 
 ## 🔧 Development Notes
 
-- The app uses Plaid's **sandbox environment** for testing
-- No database required - tokens are handled in-memory per session
-- The `access_token` is removed when starting over the user flow using the buttons on the Plaid Flash UI (intentional for demo purposes)
-- For production use, implement proper token storage and security measures
+- Runs in **development mode** for hot reload and debugging
+- Uses Plaid's **sandbox environment** (no real data)
+- No database required - session-based state
+- Tokens are cleared when restarting flows (intentional for testing)
+- For production use, implement proper token storage and security
 
 ## 🚨 Important: plaid-fetch vs Official SDK
 
-This app uses [`plaid-fetch`](https://github.com/heysanil/plaid-fetch) instead of Plaid's official Node SDK because:
+This app uses [`plaid-fetch`](https://github.com/heysanil/plaid-fetch) for better compatibility:
 
-1. **Edge Runtime Compatible** - Works in Vercel Edge Functions
-2. **Smaller Bundle** - Uses `fetch` instead of Axios
-3. **Response Format** - Returns data directly (no `.data` property)
+**Benefits:**
+- ✅ Works in Edge Runtime (Vercel)
+- ✅ Smaller bundle size
+- ✅ Uses native `fetch` API
 
-**Key Difference:**
+**Response Format Difference:**
 ```typescript
 // Official SDK
 const response = await plaidClient.linkTokenCreate({...});
@@ -203,31 +215,52 @@ const linkToken = response.data.link_token;
 
 // plaid-fetch
 const response = await plaid.linkTokenCreate({...});
-const linkToken = response.link_token; // No .data property
+const linkToken = response.link_token; // No .data wrapper
 ```
 
 ## 🐛 Troubleshooting
 
-### "Failed to initialize" error
-- Ensure `.env.local` exists in the root directory
-- Verify Plaid credentials are correct
-- Check that PLAID_ENV is set to 'sandbox'
+### Container won't start
+```bash
+# Check logs
+docker compose logs
 
-### TypeScript errors
-- Run `npm install` to ensure all dependencies are installed
-- Delete `.next` folder and restart dev server
+# Verify environment variables
+docker compose config
 
-### Module not found errors
-- Ensure you're using the correct import paths (`@/components/...`)
-- Check `tsconfig.json` has the correct path mappings
+# Ensure .env file exists
+ls -la .env
+```
+
+### Port already in use
+```bash
+# Change port in docker-compose.yml
+ports:
+  - "3001:3000"  # Use 3001 instead
+```
+
+### Ngrok tunnel not starting
+- Check `NGROK_AUTHTOKEN` is set in `.env`
+- Verify token is valid at [dashboard.ngrok.com](https://dashboard.ngrok.com)
+- Check Docker logs: `docker compose logs -f`
+
+### Alt credentials not working
+- Verify both `ALT_PLAID_CLIENT_ID` and `ALT_PLAID_SECRET` are set
+- Create a fresh user after enabling the toggle
+- Check logs for credential selection
+
+### Webhook events not appearing
+- Ensure ngrok tunnel is running (check logs)
+- Verify webhook URL is set in Link Token config
+- Check webhook panel is visible in UI
 
 ## 📜 License
 
 MIT
 
-## 🙋 Questions?
+## 🔗 Resources
 
-Check out:
 - [Plaid Documentation](https://plaid.com/docs/)
 - [Next.js Documentation](https://nextjs.org/docs)
 - [plaid-fetch GitHub](https://github.com/heysanil/plaid-fetch)
+- [Ngrok Documentation](https://ngrok.com/docs)
