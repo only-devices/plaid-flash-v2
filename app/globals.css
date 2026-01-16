@@ -570,12 +570,57 @@ body {
   display: block;
 }
 
+/* Carbon Export Button */
+.json-carbon-button {
+  position: sticky;
+  top: 18px;
+  float: right;
+  margin-right: 12px;
+  margin-left: 8px;
+  margin-bottom: -36px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.json-carbon-button:hover {
+  background: rgba(102, 126, 234, 0.25);
+  border-color: rgba(102, 126, 234, 0.5);
+}
+
+.json-carbon-button:active {
+  transform: scale(0.95);
+}
+
+.json-carbon-button img {
+  display: block;
+  opacity: 0.9;
+}
+
+.json-carbon-button.expandable-layout {
+  position: sticky;
+  top: 36px;
+  float: right;
+  margin-right: -84px;
+  margin-left: 8px;
+  margin-bottom: -36px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
 /* Expandable Copy Menu */
 .json-copy-expandable {
   position: sticky;
   top: 18px;
   float: right;
-  margin-right: 12px;
+  margin-right: 68px;
   margin-bottom: -36px;
   z-index: 10;
   width: 48px;

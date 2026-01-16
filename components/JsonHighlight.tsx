@@ -4,6 +4,7 @@ interface JsonHighlightProps {
   data: any;
   highlightKeys?: string[];
   showCopyButton?: boolean;
+  suppressCarbonButton?: boolean;
   expandableCopy?: {
     responseData: any;
     accessToken?: string | null;
@@ -16,7 +17,7 @@ interface JsonHighlightProps {
 // Generate unique ID for each component instance
 let instanceCounter = 0;
 
-export default function JsonHighlight({ data, highlightKeys = [], showCopyButton = true, expandableCopy }: JsonHighlightProps) {
+export default function JsonHighlight({ data, highlightKeys = [], showCopyButton = true, suppressCarbonButton = false, expandableCopy }: JsonHighlightProps) {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSliding, setIsSliding] = useState(false);
@@ -35,6 +36,16 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
     } catch (err) {
       console.error('Failed to copy:', err);
     }
+  };
+
+  // Generate Carbon URL with encoded JSON
+  const carbonUrl = useMemo(() => {
+    const encodedJson = encodeURIComponent(JSON.stringify(data, null, 2));
+    return `https://carbon.now.sh/?bg=rgba%280%2C0%2C0%2C1%29&t=one-dark&wt=none&l=application%2Fjson&width=680&ds=false&dsyoff=20px&dsblur=68px&wc=true&wa=true&pv=56px&ph=56px&ln=false&fl=1&fm=Droid+Sans+Mono&fs=14px&lh=152%25&si=false&es=2x&wm=false&code=${encodedJson}`;
+  }, [data]);
+
+  const handleCarbonExport = () => {
+    window.open(carbonUrl, '_blank');
   };
 
   const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken') => {
@@ -192,70 +203,11 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
   return (
     <div className="json-container">
       {showCopyButton && !expandableCopy && (
-        <button 
-          className={`json-copy-button ${copied ? 'copied' : ''}`}
-          onClick={handleCopy}
-          aria-label="Copy JSON to clipboard"
-        >
-          {copied ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-          ) : (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          )}
-        </button>
-      )}
-      {showCopyButton && expandableCopy && (
-        <div 
-          className={`json-copy-expandable ${isExpanded ? 'expanded' : ''} ${isSliding ? 'sliding' : ''}`}
-          onMouseEnter={() => !isSliding && setIsExpanded(true)}
-          onMouseLeave={() => !isSliding && setIsExpanded(false)}
-        >
-          <div className="expandable-menu">
-            <button 
-              className="expandable-pill-button"
-              onClick={() => handleExpandableCopy('response')}
-            >
-              Response
-            </button>
-            {expandableCopy.isCRA ? (
-              // CRA products: show user_id and/or user_token buttons
-              <>
-                {expandableCopy.userId && (
-                  <button 
-                    className="expandable-pill-button"
-                    onClick={() => handleExpandableCopy('userId')}
-                  >
-                    user_id
-                  </button>
-                )}
-                {expandableCopy.userToken && (
-                  <button 
-                    className="expandable-pill-button"
-                    onClick={() => handleExpandableCopy('userToken')}
-                  >
-                    user_token
-                  </button>
-                )}
-              </>
-            ) : (
-              // Non-CRA products: show access token button
-              <button 
-                className="expandable-pill-button"
-                onClick={() => handleExpandableCopy('accessToken')}
-                disabled={!expandableCopy.accessToken}
-              >
-                Access Token
-              </button>
-            )}
-          </div>
+        <>
           <button 
-            className={`json-copy-button expandable-icon ${copied ? 'copied' : ''}`}
-            aria-label="Copy options"
+            className={`json-copy-button ${copied ? 'copied' : ''}`}
+            onClick={handleCopy}
+            aria-label="Copy JSON to clipboard"
           >
             {copied ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -268,7 +220,88 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
               </svg>
             )}
           </button>
-        </div>
+          {!suppressCarbonButton && (
+            <button 
+              className="json-carbon-button"
+              onClick={handleCarbonExport}
+              aria-label="Export to Carbon"
+            >
+              <img src="/icons/carbon-icon.png" alt="Carbon" width="20" height="20" />
+            </button>
+          )}
+        </>
+      )}
+      {showCopyButton && expandableCopy && (
+        <>
+          <div 
+            className={`json-copy-expandable ${isExpanded ? 'expanded' : ''} ${isSliding ? 'sliding' : ''}`}
+            onMouseEnter={() => !isSliding && setIsExpanded(true)}
+            onMouseLeave={() => !isSliding && setIsExpanded(false)}
+          >
+            <div className="expandable-menu">
+              <button 
+                className="expandable-pill-button"
+                onClick={() => handleExpandableCopy('response')}
+              >
+                Response
+              </button>
+              {expandableCopy.isCRA ? (
+                // CRA products: show user_id and/or user_token buttons
+                <>
+                  {expandableCopy.userId && (
+                    <button 
+                      className="expandable-pill-button"
+                      onClick={() => handleExpandableCopy('userId')}
+                    >
+                      user_id
+                    </button>
+                  )}
+                  {expandableCopy.userToken && (
+                    <button 
+                      className="expandable-pill-button"
+                      onClick={() => handleExpandableCopy('userToken')}
+                    >
+                      user_token
+                    </button>
+                  )}
+                </>
+              ) : (
+                // Non-CRA products: show access token button
+                <button 
+                  className="expandable-pill-button"
+                  onClick={() => handleExpandableCopy('accessToken')}
+                  disabled={!expandableCopy.accessToken}
+                >
+                  Access Token
+                </button>
+              )}
+            </div>
+            <button 
+              className={`json-copy-button expandable-icon ${copied ? 'copied' : ''}`}
+              aria-label="Copy options"
+            >
+              {copied ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              )}
+            </button>
+          </div>
+          {!suppressCarbonButton && (
+            <button 
+              className="json-carbon-button expandable-layout"
+              onClick={handleCarbonExport}
+              aria-label="Export to Carbon"
+            >
+              <img src="/icons/carbon-icon.png" alt="Carbon" width="20" height="20" />
+            </button>
+          )}
+        </>
       )}
       <pre className="code-block">
         <code>{formatJson(data)}</code>

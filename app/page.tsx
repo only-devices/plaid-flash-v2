@@ -2022,7 +2022,7 @@ export default function Home() {
             Here&apos;s the data returned from Link:
           </p>
           <div className="account-data">
-            <JsonHighlight data={callbackData} />
+            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
           </div>
           <div className="modal-button-row single-button">
             <ArrowButton variant="blue" onClick={handleProceedWithSuccess} />
@@ -2039,7 +2039,7 @@ export default function Home() {
             <h2>onExit Callback Fired</h2>
           </div>
           <div className="account-data">
-            <JsonHighlight data={callbackData} />
+            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
           </div>
           <div className="modal-button-row single-button">
             <ArrowButton variant="red" onClick={handleExitRetry} />
@@ -2056,7 +2056,7 @@ export default function Home() {
             <h2>onExit Callback Fired</h2>
           </div>
           <div className="account-data">
-            <JsonHighlight data={callbackData} />
+            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
           </div>
           <div className="button-row">
             <button className="action-button button-red" onClick={handleExitRetry}>
@@ -2456,7 +2456,7 @@ export default function Home() {
                 {linkEvents.length > 0 ? (
                   linkEvents.map((event, index) => (
                     <div key={index} className={`event-log-item ${index % 2 === 0 ? 'even' : 'odd'}`}>
-                      <JsonHighlight data={event} showCopyButton={false} />
+                      <JsonHighlight data={event} showCopyButton={false} suppressCarbonButton={true} />
                     </div>
                   ))
                 ) : (
