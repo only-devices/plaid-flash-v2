@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     const response = await plaid.signalEvaluate({
       access_token: access_token,
       account_id: accountId,
-      client_transaction_id: client_transaction_id || `txn_${Date.now()}`,
+      client_transaction_id: `flash_txn_${Date.now()}`,
       amount: amount || 100.00,
       ruleset_key: 'default'
     } as any);

@@ -1962,8 +1962,8 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 /* Settings Grid */
 .settings-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 24px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
   margin-bottom: 32px;
   animation: fadeIn 0.7s ease-out 0.2s backwards;
 }
@@ -1991,16 +1991,17 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  grid-column: 1 / -1; /* Span both columns */
 }
 
 .settings-info-label {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   color: #ffffff;
 }
 
 .settings-info-value {
-  font-size: 14px;
+  font-size: 12px;
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: rgba(136, 192, 208, 0.9);
   text-overflow: ellipsis;
@@ -2024,7 +2025,7 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   color: #ffffff;
   padding: 8px 16px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   opacity: 0;
@@ -2124,7 +2125,7 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 
 /* Toggle Label */
 .settings-toggle-label {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   color: #ffffff;
   flex: 1;
@@ -2400,6 +2401,52 @@ body:has(.webhook-panel-container) .event-logs-scroll {
   z-index: 999;
   opacity: 0;
   animation: slideUp 0.5s ease-out forwards;
+}
+
+/* Embedded Webhook Panel (inside modal) */
+.webhook-panel-embedded {
+  background: rgba(26, 26, 46, 0.7);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 20px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  height: 350px;
+  max-height: 350px;
+  display: flex;
+  flex-direction: column;
+}
+
+.webhook-panel-embedded .webhook-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #ffffff;
+}
+
+.webhook-panel-embedded .webhook-panel-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.webhook-panel-embedded .webhook-panel-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.webhook-panel-embedded .webhook-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
+  border-radius: 8px;
+  padding-top: 8px;
 }
 
 @keyframes slideUp {

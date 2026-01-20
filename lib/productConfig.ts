@@ -28,6 +28,7 @@ export interface ProductConfig {
   apiTitle?: string;
   children?: ProductConfig[];
   additionalLinkParams?: Record<string, any>;
+  additionalSandboxCreateParams?: Record<string, any>;
   additionalApiParams?: Record<string, any>;
   highlightKeys?: string[];
   icon?: string;
@@ -75,7 +76,6 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiEndpoint: '/api/signal-evaluate',
             apiTitle: '/signal/evaluate',
             additionalApiParams: {
-              client_transaction_id: 'txn_flash_' + Date.now(),
               amount: 100.00
             }
           },
@@ -164,6 +164,9 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             stated_account_number_enabled: true,
             manual_entry_enabled: true
           }
+        },
+        additionalSandboxCreateParams: {
+          institution_id: 'ins_127991'
         }
       }
     ]
@@ -195,7 +198,13 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             icon: '/icons/transactions.png',
             apiEndpoint: '/api/transactions-get',
             apiTitle: '/transactions/get',
-            additionalApiParams: getDateRange()
+            additionalApiParams: getDateRange(),
+            additionalSandboxCreateParams: {
+              options: {
+                override_username: "user_transactions_dynamic",
+                override_password: "pass_transactions_dynamic",
+              }
+            }
           },
           {
             id: 'transactions-sync',
@@ -210,6 +219,12 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             additionalLinkParams: {
               transactions: {
                 days_requested: 14
+              }
+            },
+            additionalSandboxCreateParams: {
+              options: {
+                override_username: "user_transactions_dynamic",
+                override_password: "pass_transactions_dynamic",
               }
             },
             highlightKeys: ['added', 'has_more', 'modified', 'next_cursor', 'removed', 'transactions_update_status']
@@ -303,6 +318,13 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         highlightKeys: ['income_insights'],
         additionalLinkParams: {
           consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+        },
+        additionalSandboxCreateParams: {
+          initial_products: ['cra_income_insights'],
+          options: {
+            override_username: "user_bank_income",
+            override_password: "{}",
+          }
         },
         requiresWebhook: true
       },

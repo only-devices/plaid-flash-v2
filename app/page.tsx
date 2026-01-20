@@ -25,7 +25,7 @@ export default function Home() {
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -59,9 +59,11 @@ export default function Home() {
   const [tempUseAltCredentials, setTempUseAltCredentials] = useState(false);
   const [altCredentialsAvailable, setAltCredentialsAvailable] = useState(false);
   const [usedAltCredentials, setUsedAltCredentials] = useState<boolean>(false); // Track which credentials were used for this session
-  const [rememberedUserExperience, setRememberedUserExperience] = useState(true);
-  const [tempIncludePhoneNumber, settempIncludePhoneNumber] = useState(true);
-  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || rememberedUserExperience;
+  const [includePhoneNumber, setIncludePhoneNumber] = useState(true);
+  const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
+  const [bypassLink, setBypassLink] = useState(false);
+  const [tempBypassLink, setTempBypassLink] = useState(false);
+  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || includePhoneNumber || bypassLink;
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   
   // Demo Mode state
@@ -86,6 +88,12 @@ export default function Home() {
   const [editedProductApiConfig, setEditedProductApiConfig] = useState('');
   const [productApiConfigError, setProductApiConfigError] = useState<string | null>(null);
 
+  // Sandbox Config state (for bypass Link mode)
+  const [sandboxConfig, setSandboxConfig] = useState<any>(null);
+  const [isEditingSandboxConfig, setIsEditingSandboxConfig] = useState(false);
+  const [editedSandboxConfig, setEditedSandboxConfig] = useState('');
+  const [sandboxConfigError, setSandboxConfigError] = useState<string | null>(null);
+
   // Webhook state
   const [webhooks, setWebhooks] = useState<any[]>([]);
   const [showWebhookPanel, setShowWebhookPanel] = useState(false);
@@ -101,13 +109,38 @@ export default function Home() {
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
     baseParams: Record<string, any>,
-    productConfig: ProductConfig | undefined
+    productConfig: ProductConfig | undefined,
+    accountsDataParam?: any
   ): Record<string, any> => {
     const requestBody = { ...baseParams };
     
     // Automatically merge additional API params if they exist
     if (productConfig?.additionalApiParams) {
       Object.assign(requestBody, productConfig.additionalApiParams);
+    }
+    
+    // For Signal Evaluate, add dynamic fields
+    if (productConfig?.id === 'signal-evaluate') {
+      const accounts = accountsDataParam?.accounts || accountsData?.accounts;
+      if (accounts && accounts.length > 0) {
+        requestBody.account_id = accounts[0].account_id;
+      }
+      // Add client_transaction_id with timestamp
+      if (!requestBody.client_transaction_id) {
+        requestBody.client_transaction_id = 'txn_flash_' + Date.now();
+      }
+      // Add ruleset_key
+      if (!requestBody.ruleset_key) {
+        requestBody.ruleset_key = 'default';
+      }
+    }
+    
+    // For Signal Balance, add account_id from the first account
+    if (productConfig?.id === 'signal-balance') {
+      const accounts = accountsDataParam?.accounts || accountsData?.accounts;
+      if (accounts && accounts.length > 0) {
+        requestBody.account_id = accounts[0].account_id;
+      }
     }
     
     return requestBody;
@@ -365,10 +398,52 @@ export default function Home() {
       return;
     }
 
+    // Bypass Link mode: build sandbox config instead of link token config
+    if (bypassLink) {
+      const sandboxFullConfig: any = {
+        institution_id: 'ins_109511',
+        initial_products: productConfig.products,
+        options: {}
+      };
+
+      // Apply additional sandbox create params first if they exist
+      if (productConfig.additionalSandboxCreateParams) {
+        const additionalParams = productConfig.additionalSandboxCreateParams;
+        // Deep merge: handle nested options object properly
+        Object.keys(additionalParams).forEach(key => {
+          if (key === 'options' && typeof additionalParams.options === 'object') {
+            // Merge options objects
+            sandboxFullConfig.options = {
+              ...sandboxFullConfig.options,
+              ...additionalParams.options
+            };
+          } else {
+            sandboxFullConfig[key] = additionalParams[key];
+          }
+        });
+      }
+
+      // Add webhook URL if available (will override or add to existing options)
+      if (webhookUrl) {
+        sandboxFullConfig.options.webhook = webhookUrl;
+      }
+
+      setSandboxConfig(sandboxFullConfig);
+      
+      // In Zap Mode, bypass the preview modal and go straight to sandbox token creation
+      if (zapMode) {
+        handleProceedWithBypassLink(sandboxFullConfig);
+      } else {
+        setModalState('preview-sandbox-config');
+        setShowModal(true);
+      }
+      return;
+    }
+
     // Build the FULL configuration that will be sent to Plaid
     const fullConfig: any = {
       link_customization_name: 'flash',
-      user: rememberedUserExperience 
+      user: includePhoneNumber 
         ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
         : { client_user_id: 'flash_user_id01' },
       client_name: 'Plaid Flash',
@@ -541,6 +616,59 @@ export default function Home() {
     // Use passed params or fall back to state (for cases where state is already set)
     const effectiveUserId = userIdParam ?? userId;
     const effectiveUserToken = userTokenParam ?? userToken;
+
+    // Bypass Link mode for CRA products: build sandbox config instead
+    if (bypassLink) {
+      const sandboxFullConfig: any = {
+        institution_id: 'ins_109511',
+        initial_products: productConfig.products,
+        options: {}
+      };
+
+      // Apply additional sandbox create params first if they exist
+      if (productConfig.additionalSandboxCreateParams) {
+        const additionalParams = productConfig.additionalSandboxCreateParams;
+        // Deep merge: handle nested options object properly
+        Object.keys(additionalParams).forEach(key => {
+          if (key === 'options' && typeof additionalParams.options === 'object') {
+            // Merge options objects
+            sandboxFullConfig.options = {
+              ...sandboxFullConfig.options,
+              ...additionalParams.options
+            };
+          } else {
+            sandboxFullConfig[key] = additionalParams[key];
+          }
+        });
+      }
+
+      // Add webhook URL if available (will override or add to existing options)
+      if (webhookUrl) {
+        sandboxFullConfig.options.webhook = webhookUrl;
+      }
+
+      // Add user_id or user_token for CRA products
+      if (useLegacyUserToken && effectiveUserToken) {
+        sandboxFullConfig.user_token = effectiveUserToken;
+        setUsedUserToken(true);
+      } else if (effectiveUserId) {
+        sandboxFullConfig.user_id = effectiveUserId;
+        setUsedUserToken(false);
+      } else if (effectiveUserToken) {
+        sandboxFullConfig.user_token = effectiveUserToken;
+        setUsedUserToken(true);
+      }
+
+      setSandboxConfig(sandboxFullConfig);
+      
+      // In Zap Mode, bypass the preview modal and go straight to sandbox token creation
+      if (zapMode) {
+        handleProceedWithBypassLink(sandboxFullConfig);
+      } else {
+        setModalState('preview-sandbox-config');
+      }
+      return;
+    }
 
     // Build the FULL configuration for CRA products
     const fullConfig: any = {
@@ -817,6 +945,55 @@ export default function Home() {
     setEditedProductApiConfig('');
   };
 
+  // Sandbox Config Preview Handlers (for Bypass Link mode)
+  const handleToggleSandboxConfigEditMode = () => {
+    if (!isEditingSandboxConfig) {
+      // Entering edit mode - populate editedSandboxConfig with current config
+      setEditedSandboxConfig(JSON.stringify(sandboxConfig, null, 2));
+      setSandboxConfigError(null);
+    }
+    setIsEditingSandboxConfig(!isEditingSandboxConfig);
+  };
+
+  const handleSaveSandboxConfig = () => {
+    try {
+      const parsed = JSON.parse(editedSandboxConfig);
+      setSandboxConfig(parsed);
+      setSandboxConfigError(null);
+      setIsEditingSandboxConfig(false);
+      return true;
+    } catch (error: any) {
+      setSandboxConfigError(`Invalid JSON: ${error.message}`);
+      return false;
+    }
+  };
+
+  const handleCancelSandboxConfigEdit = () => {
+    setIsEditingSandboxConfig(false);
+    setSandboxConfigError(null);
+    setEditedSandboxConfig('');
+  };
+
+  const handleSaveAndProceedWithSandboxConfig = async () => {
+    try {
+      // Validate JSON first
+      const parsed = JSON.parse(editedSandboxConfig);
+      
+      // Close modal immediately
+      setShowModal(false);
+      
+      // Update config and reset edit state
+      setSandboxConfig(parsed);
+      setSandboxConfigError(null);
+      setIsEditingSandboxConfig(false);
+      
+      // Proceed with bypass link flow
+      await handleProceedWithBypassLink(parsed);
+    } catch (error: any) {
+      setSandboxConfigError(`Invalid JSON: ${error.message}`);
+    }
+  };
+
   const handleSaveAndProceedWithProductApi = async () => {
     try {
       // Validate JSON first
@@ -971,6 +1148,7 @@ export default function Home() {
     setTempDemoMode(demoMode);
     setTempUseLegacyUserToken(useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
+    setTempBypassLink(bypassLink);
     // Hide product modal and show settings modal
     setShowProductModal(false);
     setShowChildModal(false);
@@ -999,7 +1177,8 @@ export default function Home() {
     setDemoMode(tempDemoMode);
     setUseLegacyUserToken(tempUseLegacyUserToken);
     setUseAltCredentials(tempUseAltCredentials);
-    setRememberedUserExperience(tempIncludePhoneNumber);
+    setIncludePhoneNumber(tempIncludePhoneNumber);
+    setBypassLink(tempBypassLink);
     
     // Close settings modal
     setShowSettingsModal(false);
@@ -1032,7 +1211,7 @@ export default function Home() {
   };
 
   const handleToggleIncludePhoneNumber = () => {
-    settempIncludePhoneNumber(!tempIncludePhoneNumber);
+    setTempIncludePhoneNumber(!tempIncludePhoneNumber);
   };
 
   const handleToggleLayer = () => {
@@ -1057,6 +1236,10 @@ export default function Home() {
 
   const handleToggleAltCredentials = () => {
     setTempUseAltCredentials(!tempUseAltCredentials);
+  };
+
+  const handleToggleBypassLink = () => {
+    setTempBypassLink(!tempBypassLink);
   };
 
   const handleToggleDemoProduct = (productId: string) => {
@@ -1197,9 +1380,11 @@ export default function Home() {
       }
 
       // Build request body with access token and any additional params
+      // Pass accountsData only if it was fetched (not for Signal Balance)
       const requestBody = buildProductRequestBody(
         { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
-        productConfig
+        productConfig,
+        skipAccountsGet ? undefined : accountsData
       );
       
       const productResponse = await fetch(productConfig.apiEndpoint, {
@@ -1234,6 +1419,201 @@ export default function Home() {
       setShowModal(true);
     }
   }, [selectedProduct, selectedChildProduct]);
+
+  // Bypass Link Mode Handlers
+  const handleProceedWithBypassLink = async (sandboxConfigOverride?: any) => {
+    // Show creating sandbox item modal
+    setModalState('creating-sandbox-item');
+    setShowModal(true);
+    
+    try {
+      // Use the configOverride if provided, otherwise use sandboxConfig state
+      const configToUse = sandboxConfigOverride || sandboxConfig;
+      
+      // Call /sandbox/public_token/create
+      const response = await fetch('/api/sandbox-public-token-create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...configToUse, useAltCredentials: usedAltCredentials || useAltCredentials }),
+      });
+      
+      const data = await response.json();
+      
+      // Check for API errors
+      if (response.status >= 400) {
+        setErrorData(data);
+        setApiStatusCode(response.status);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+      
+      const { public_token } = data;
+      
+      // Skip Link entirely - go directly to token exchange
+      // No onEvent, onExit, or onSuccess callbacks
+      await handleBypassLinkSuccess(public_token);
+    } catch (error) {
+      console.error('Error creating sandbox public token:', error);
+      setErrorMessage('Failed to create sandbox public token. Please try again.');
+      setModalState('error');
+      setShowModal(true);
+      setShowWelcome(false);
+      
+      // Reset after a delay
+      setTimeout(() => {
+        setShowModal(false);
+        setModalState('loading');
+        setShowProductModal(true);
+      }, 3000);
+    }
+  };
+
+  const handleBypassLinkSuccess = async (public_token: string) => {
+    try {
+      // Get the effective product ID
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+
+      // Check if this is a CRA product
+      if (productConfig?.isCRA) {
+        // CRA products: skip access_token exchange, show product API preview directly
+        // Keep showing 'creating-sandbox-item' modal during this process
+        try {
+          if (!productConfig.apiEndpoint) {
+            throw new Error('Product API endpoint not configured');
+          }
+
+          // Build request body with user_id or user_token
+          const baseParams: any = {
+            useAltCredentials: usedAltCredentials || useAltCredentials
+          };
+          if (usedUserToken && userToken) {
+            baseParams.user_token = userToken;
+          } else if (userId) {
+            baseParams.user_id = userId;
+          } else if (userToken) {
+            baseParams.user_token = userToken;
+          }
+          
+          const requestBody = buildProductRequestBody(baseParams, productConfig);
+          
+          // Store the FULL config (with useAltCredentials) for the API call
+          setProductApiConfig(requestBody);
+          setModalState('preview-product-api');
+        } catch (error) {
+          console.error('Error building CRA product API config:', error);
+          setErrorMessage('We encountered an issue preparing the API call. Please try again.');
+          setModalState('error');
+          
+          // Reset after a delay
+          setTimeout(() => {
+            setShowModal(false);
+            setProductData(null);
+            setModalState('loading');
+            setShowButton(true);
+            setShowWelcome(false);
+            setShowProductModal(true);
+          }, 3000);
+        }
+        return;
+      }
+
+      // Non-CRA products: show processing modal for token exchange and accounts/get
+      setModalState('processing-accounts');
+      setShowModal(true);
+
+      // Exchange public token for access token
+      const exchangeResponse = await fetch('/api/exchange-public-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+      });
+      
+      if (!exchangeResponse.ok) {
+        const errorData = await exchangeResponse.json();
+        setErrorData(errorData);
+        setApiStatusCode(exchangeResponse.status);
+        setModalState('api-error');
+        return;
+      }
+
+      const { access_token } = await exchangeResponse.json();
+      setAccessToken(access_token);
+
+      // Skip accounts/get for Signal Balance
+      const skipAccountsGet = effectiveProductId === 'signal-balance';
+
+      if (!skipAccountsGet) {
+        // Get accounts data
+        const accountsResponse = await fetch('/api/accounts-get', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ access_token }),
+        });
+
+        const accountsData = await accountsResponse.json();
+        
+        // Check for API errors
+        if (accountsResponse.status >= 400) {
+          setErrorData(accountsData);
+          setApiStatusCode(accountsResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        
+        setAccountsData(accountsData);
+        setApiStatusCode(accountsResponse.status);
+        setModalState('accounts-data');
+      } else {
+        // For Signal Balance, skip accounts/get and go straight to processing product
+        setModalState('processing-product');
+        
+        if (!productConfig || !productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+
+        // Build request body with access token and any additional params
+        const requestBody = buildProductRequestBody(
+          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+          productConfig
+        );
+        
+        const productResponse = await fetch(productConfig.apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        const productData = await productResponse.json();
+        
+        // Check for API errors
+        if (productResponse.status >= 400) {
+          setErrorData(productData);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        
+        setProductData(productData);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+      }
+    } catch (error) {
+      console.error('Error in bypass Link success flow:', error);
+      setErrorMessage('We encountered an issue. Please try again.');
+      setModalState('error');
+    }
+  };
 
   const onSuccess = useCallback((public_token: string, metadata: any) => {
     // Hide the button
@@ -1301,7 +1681,7 @@ export default function Home() {
         
         const requestBody = buildProductRequestBody(baseParams, productConfig);
         
-        // Store the config and show preview modal
+        // Store the FULL config (with useAltCredentials) for the API call
         setProductApiConfig(requestBody);
         setModalState('preview-product-api');
         setShowModal(true);
@@ -1454,10 +1834,10 @@ export default function Home() {
         throw new Error('Product API endpoint not configured');
       }
 
-      // Build request body with access token and any additional params
-      const requestBody = buildProductRequestBody({ access_token: accessToken }, productConfig);
+      // Build request body with access token, accounts data, and any additional params
+      const requestBody = buildProductRequestBody({ access_token: accessToken, useAltCredentials: usedAltCredentials || useAltCredentials }, productConfig, accountsData);
       
-      // Store the config and show preview modal
+      // Store the FULL config (with useAltCredentials) for the API call
       setProductApiConfig(requestBody);
       setModalState('preview-product-api');
     } catch (error) {
@@ -1536,7 +1916,12 @@ export default function Home() {
       }
 
       // Build request body with access token and any additional params
-      const requestBody = buildProductRequestBody({ access_token: demoAccessToken }, productConfig);
+      // Pass accountsData only if it was fetched (not for Signal Balance)
+      const requestBody = buildProductRequestBody(
+        { access_token: demoAccessToken }, 
+        productConfig,
+        skipAccountsGet ? undefined : accountsData
+      );
       
       const productResponse = await fetch(productConfig.apiEndpoint, {
         method: 'POST',
@@ -1825,7 +2210,7 @@ export default function Home() {
     // Create Link token config with dynamically built products
     const demoConfig = {
       link_customization_name: 'flash',
-      user: rememberedUserExperience
+      user: includePhoneNumber
         ? { client_user_id: 'flash_user_id01' }
         : { client_user_id: 'flash_user_id01', phone_number: '+14155550011' },
       client_name: 'Plaid Flash',
@@ -2150,6 +2535,72 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'preview-sandbox-config' && sandboxConfig) {
+      // Check if this is a CRA product to modify the back button behavior
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      const isCRA = productConfig?.isCRA;
+      
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>{isCRA ? 'Step 2: ' : ''}Here&apos;s the /sandbox/public_token/create configuration:</h2>
+          </div>
+          {!isEditingSandboxConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button 
+                  className="config-edit-icon" 
+                  onClick={handleToggleSandboxConfigEditMode}
+                  title="Edit configuration"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <JsonHighlight data={sandboxConfig} />
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={isCRA ? handleGoBackToUserCreate : handleGoBackToProducts} />
+                <ArrowButton variant="blue" onClick={() => handleProceedWithBypassLink(sandboxConfig)} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedSandboxConfig}
+                  language="json"
+                  onChange={(e) => setEditedSandboxConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '12px',
+                    minHeight: '400px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {sandboxConfigError && (
+                  <div className="config-error">
+                    {sandboxConfigError}
+                  </div>
+                )}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelSandboxConfigEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveAndProceedWithSandboxConfig} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
     if (modalState === 'callback-success' && callbackData) {
       return (
         <div className="modal-callback">
@@ -2262,6 +2713,15 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'creating-sandbox-item') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Creating Sandbox item</p>
+        </div>
+      );
+    }
+
     if (modalState === 'tidying-up') {
       return (
         <div className="modal-loading">
@@ -2310,63 +2770,117 @@ export default function Home() {
       // Extract endpoint name from apiEndpoint (e.g., "/api/transactions-get" -> "/transactions/get")
       const apiName = productConfig?.apiTitle || '';
       
+      // Check if we should show webhook panel (CRA products in Bypass Link mode)
+      const showEmbeddedWebhookPanel = isCRA && bypassLink;
+      
+      // Remove useAltCredentials from display (it's internal, not sent to Plaid)
+      const { useAltCredentials: _, ...displayConfig } = productApiConfig;
+      
       return (
-        <div className="modal-success">
-          <div className="success-header">
-            <h2>Here&apos;s the {apiName} call that will be made:</h2>
+        <>
+          <div className="modal-success">
+            <div className="success-header">
+              <h2>Here&apos;s the {apiName} call that will be made:</h2>
+            </div>
+            {!isEditingProductApiConfig ? (
+              <>
+                <div className="account-data config-data-with-edit">
+                  <button 
+                    className="config-edit-icon" 
+                    onClick={handleToggleEditProductApiMode}
+                    title="Edit configuration"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                  </button>
+                  <JsonHighlight data={displayConfig} />
+                </div>
+                <div className="modal-button-row two-buttons">
+                  <ArrowButton variant="red" direction="back" onClick={handleGoBackFromProductApiPreview} />
+                  <ArrowButton variant="blue" onClick={() => handleProceedWithProductApi(productApiConfig)} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="code-editor-container">
+                  <CodeEditor
+                    value={editedProductApiConfig}
+                    language="json"
+                    onChange={(e) => setEditedProductApiConfig(e.target.value)}
+                    padding={15}
+                    data-color-mode="dark"
+                    style={{
+                      fontSize: 13,
+                      fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                      borderRadius: '12px',
+                      minHeight: '400px',
+                      maxHeight: '500px',
+                      overflowY: 'auto',
+                    }}
+                  />
+                  {productApiConfigError && (
+                    <div className="config-error">
+                      {productApiConfigError}
+                    </div>
+                  )}
+                </div>
+                <div className="modal-button-row two-buttons">
+                  <ArrowButton variant="red" direction="back" onClick={handleCancelProductApiEdit} />
+                  <ArrowButton variant="blue" onClick={handleSaveAndProceedWithProductApi} />
+                </div>
+              </>
+            )}
           </div>
-          {!isEditingProductApiConfig ? (
-            <>
-              <div className="account-data config-data-with-edit">
-                <button 
-                  className="config-edit-icon" 
-                  onClick={handleToggleEditProductApiMode}
-                  title="Edit configuration"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
-                </button>
-                <JsonHighlight data={productApiConfig} />
+          
+          {/* Embedded Webhook Panel for CRA Bypass Link */}
+          {showEmbeddedWebhookPanel && (
+            <div className="modal-success" style={{ marginTop: '20px' }}>
+              <div className="webhook-panel-embedded">
+                <div className="webhook-panel-header">
+                  <h3>Webhooks</h3>
+                  {webhooks.length > 0 && (
+                    <span className="webhook-count">{webhooks.length}</span>
+                  )}
+                </div>
+                
+                <div className="webhook-panel-content">
+                  {webhooks.length > 0 ? (
+                    <div className="webhook-scroll">
+                      {webhooks.map((webhook, index) => (
+                        <div key={webhook.id} className={`webhook-item ${index % 2 === 0 ? 'even' : 'odd'}`}>
+                          <div className="webhook-item-header">
+                            <span className="webhook-time">
+                              {new Date(webhook.timestamp).toLocaleTimeString('en-US', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: false
+                              })}
+                            </span>
+                            <span className="webhook-type">{webhook.webhook_type}</span>
+                            <span className="webhook-code">{webhook.webhook_code}</span>
+                          </div>
+                          <div className="webhook-payload">
+                            <JsonHighlight data={webhook.payload} showCopyButton={false} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="webhook-placeholder">
+                      <pre className="code-block">
+                        <code>... waiting for webhooks</code>
+                      </pre>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={handleGoBackFromProductApiPreview} />
-                <ArrowButton variant="blue" onClick={() => handleProceedWithProductApi(productApiConfig)} />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="code-editor-container">
-                <CodeEditor
-                  value={editedProductApiConfig}
-                  language="json"
-                  onChange={(e) => setEditedProductApiConfig(e.target.value)}
-                  padding={15}
-                  data-color-mode="dark"
-                  style={{
-                    fontSize: 13,
-                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                    borderRadius: '12px',
-                    minHeight: '400px',
-                    maxHeight: '500px',
-                    overflowY: 'auto',
-                  }}
-                />
-                {productApiConfigError && (
-                  <div className="config-error">
-                    {productApiConfigError}
-                  </div>
-                )}
-              </div>
-              <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={handleCancelProductApiEdit} />
-                <ArrowButton variant="blue" onClick={handleSaveAndProceedWithProductApi} />
-              </div>
-            </>
+            </div>
           )}
-        </div>
+        </>
       );
     }
 
@@ -2531,7 +3045,7 @@ export default function Home() {
               disabled={true}
             />
             <SettingsToggle 
-              label="CRA: Use Legacy user_token" 
+              label="Use legacy user_token" 
               checked={tempUseLegacyUserToken} 
               onChange={handleToggleLegacyUserToken}
               disabled={false}
@@ -2542,6 +3056,12 @@ export default function Home() {
               onChange={handleToggleAltCredentials}
               disabled={!altCredentialsAvailable}
               tooltip={!altCredentialsAvailable ? 'Set ALT_PLAID_CLIENT_ID and ALT_PLAID_SECRET in .env' : undefined}
+            />
+            <SettingsToggle 
+              label="Bypass Link (Sandbox Only)" 
+              checked={tempBypassLink} 
+              onChange={handleToggleBypassLink}
+              disabled={false}
             />
             <div className="settings-info-row">
               <span className="settings-info-label">Webhook URL</span>
