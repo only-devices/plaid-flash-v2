@@ -10,6 +10,7 @@ interface JsonHighlightProps {
     accessToken?: string | null;
     userId?: string | null;
     userToken?: string | null;
+    linkToken?: string | null;
     isCRA?: boolean;
   };
 }
@@ -48,7 +49,7 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
     window.open(carbonUrl, '_blank');
   };
 
-  const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken') => {
+  const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken' | 'linkToken') => {
     if (!expandableCopy) return;
     
     try {
@@ -60,6 +61,8 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
         await navigator.clipboard.writeText(expandableCopy.userId);
       } else if (type === 'userToken' && expandableCopy.userToken) {
         await navigator.clipboard.writeText(expandableCopy.userToken);
+      } else if (type === 'linkToken' && expandableCopy.linkToken) {
+        await navigator.clipboard.writeText(expandableCopy.linkToken);
       }
       
       // Show success state
@@ -266,13 +269,22 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
                   )}
                 </>
               ) : (
-                // Non-CRA products: show access token button
+                // Non-CRA products: show access token button only if provided
+                expandableCopy.accessToken && (
+                  <button 
+                    className="expandable-pill-button"
+                    onClick={() => handleExpandableCopy('accessToken')}
+                  >
+                    Access Token
+                  </button>
+                )
+              )}
+              {expandableCopy.linkToken && (
                 <button 
                   className="expandable-pill-button"
-                  onClick={() => handleExpandableCopy('accessToken')}
-                  disabled={!expandableCopy.accessToken}
+                  onClick={() => handleExpandableCopy('linkToken')}
                 >
-                  Access Token
+                  Link Token
                 </button>
               )}
             </div>

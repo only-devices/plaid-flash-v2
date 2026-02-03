@@ -11,6 +11,7 @@ import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
 import WebhookPanel from '@/components/WebhookPanel';
+import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
 import { isWebhooksEnabledClient } from '@/lib/featureFlags';
 
@@ -39,6 +40,8 @@ export default function Home() {
   const [linkEvents, setLinkEvents] = useState<any[]>([]);
   const [showEventLogs, setShowEventLogs] = useState(false);
   const [eventLogsCopied, setEventLogsCopied] = useState(false);
+  const [eventLogsExpanded, setEventLogsExpanded] = useState(false);
+  const [eventLogsSliding, setEventLogsSliding] = useState(false);
   const eventLogsRef = useRef<HTMLDivElement>(null);
   const [linkTokenConfig, setLinkTokenConfig] = useState<any>(null);
   const [eventLogsPosition, setEventLogsPosition] = useState<'left' | 'right'>('right');
@@ -102,6 +105,9 @@ export default function Home() {
   const [webhooks, setWebhooks] = useState<any[]>([]);
   const [showWebhookPanel, setShowWebhookPanel] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+
+  // View mode state for CRA Income Insights
+  const [viewMode, setViewMode] = useState<'json' | 'visual'>('json');
 
   // Embedded Link state
   const [embeddedLinkActive, setEmbeddedLinkActive] = useState(false);
@@ -2621,7 +2627,14 @@ export default function Home() {
             Here&apos;s the data returned from Link:
           </p>
           <div className="account-data">
-            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
+            <JsonHighlight 
+              data={callbackData} 
+              suppressCarbonButton={true}
+              expandableCopy={{
+                responseData: callbackData,
+                linkToken: linkToken
+              }}
+            />
           </div>
           <div className="modal-button-row single-button">
             <ArrowButton variant="blue" onClick={handleProceedWithSuccess} />
@@ -2638,7 +2651,14 @@ export default function Home() {
             <h2>onExit Callback Fired</h2>
           </div>
           <div className="account-data">
-            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
+            <JsonHighlight 
+              data={callbackData} 
+              suppressCarbonButton={true}
+              expandableCopy={{
+                responseData: callbackData,
+                linkToken: linkToken
+              }}
+            />
           </div>
           <div className="modal-button-row single-button">
             <ArrowButton variant="red" onClick={handleExitRetry} />
@@ -2655,7 +2675,14 @@ export default function Home() {
             <h2>onExit Callback Fired</h2>
           </div>
           <div className="account-data">
-            <JsonHighlight data={callbackData} suppressCarbonButton={true} />
+            <JsonHighlight 
+              data={callbackData} 
+              suppressCarbonButton={true}
+              expandableCopy={{
+                responseData: callbackData,
+                linkToken: linkToken
+              }}
+            />
           </div>
           <div className="button-row">
             <button className="action-button button-red" onClick={handleExitRetry}>
@@ -2898,6 +2925,7 @@ export default function Home() {
       const productConfig = getProductConfigById(effectiveProductId!);
       const apiTitle = productConfig?.apiTitle || 'API Response';
       const isCRA = productConfig?.isCRA;
+      const isIncomeInsights = effectiveProductId === 'cra-income-insights';
       
       return (
         <div className="modal-success">
@@ -2912,20 +2940,52 @@ export default function Home() {
               </button>
             )}
           </div>
+
+          {/* Tab buttons for CRA Income Insights */}
+          {isIncomeInsights && (
+            <div className="view-mode-tabs">
+              <button
+                className={`view-mode-tab ${viewMode === 'json' ? 'active' : ''}`}
+                onClick={() => setViewMode('json')}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="16 18 22 12 16 6"></polyline>
+                  <polyline points="8 6 2 12 8 18"></polyline>
+                </svg>
+                JSON
+              </button>
+              <button
+                className={`view-mode-tab ${viewMode === 'visual' ? 'active' : ''}`}
+                onClick={() => setViewMode('visual')}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="20" x2="18" y2="10"></line>
+                  <line x1="12" y1="20" x2="12" y2="4"></line>
+                  <line x1="6" y1="20" x2="6" y2="14"></line>
+                </svg>
+                Visual
+              </button>
+            </div>
+          )}
+
           <div className="account-data">
-            <JsonHighlight 
-              data={productData} 
-              highlightKeys={productConfig?.highlightKeys}
-              expandableCopy={isCRA ? {
-                responseData: productData,
-                userId: userId,
-                userToken: userToken,
-                isCRA: true
-              } : {
-                responseData: productData,
-                accessToken: accessToken || demoAccessToken
-              }}
-            />
+            {isIncomeInsights && viewMode === 'visual' ? (
+              <IncomeInsightsVisualization data={productData} />
+            ) : (
+              <JsonHighlight 
+                data={productData} 
+                highlightKeys={productConfig?.highlightKeys}
+                expandableCopy={isCRA ? {
+                  responseData: productData,
+                  userId: userId,
+                  userToken: userToken,
+                  isCRA: true
+                } : {
+                  responseData: productData,
+                  accessToken: accessToken || demoAccessToken
+                }}
+              />
+            )}
           </div>
           {demoLinkCompleted ? (
             // Demo Mode: show "Back to Products" button (reset is in header)
@@ -3163,33 +3223,77 @@ export default function Home() {
             Here&apos;s what went down:
           </p>
             <div className="event-logs-wrapper">
-              <button 
-                className={`event-logs-copy-button ${eventLogsCopied ? 'copied' : ''}`}
-                onClick={async () => {
-                  if (linkEvents.length > 0) {
-                    try {
-                      await navigator.clipboard.writeText(JSON.stringify(linkEvents, null, 2));
-                      setEventLogsCopied(true);
-                      setTimeout(() => setEventLogsCopied(false), 2000);
-                    } catch (err) {
-                      console.error('Failed to copy:', err);
-                    }
-                  }
-                }}
-                disabled={linkEvents.length === 0}
-                aria-label="Copy all event callbacks"
+              <div 
+                className={`json-copy-expandable ${eventLogsExpanded ? 'expanded' : ''} ${eventLogsSliding ? 'sliding' : ''}`}
+                onMouseEnter={() => !eventLogsSliding && setEventLogsExpanded(true)}
+                onMouseLeave={() => !eventLogsSliding && setEventLogsExpanded(false)}
+                style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10 }}
               >
-                {eventLogsCopied ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                  </svg>
-                )}
-              </button>
+                <div className="expandable-menu">
+                  <button 
+                    className="expandable-pill-button"
+                    onClick={async () => {
+                      if (linkEvents.length > 0) {
+                        try {
+                          await navigator.clipboard.writeText(JSON.stringify(linkEvents, null, 2));
+                          setEventLogsCopied(true);
+                          setEventLogsSliding(true);
+                          setTimeout(() => {
+                            setEventLogsExpanded(false);
+                            setEventLogsSliding(false);
+                            setTimeout(() => {
+                              setEventLogsCopied(false);
+                            }, 300);
+                          }, 1500);
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                        }
+                      }
+                    }}
+                    disabled={linkEvents.length === 0}
+                  >
+                    All Logs
+                  </button>
+                  {linkToken && (
+                    <button 
+                      className="expandable-pill-button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(linkToken);
+                          setEventLogsCopied(true);
+                          setEventLogsSliding(true);
+                          setTimeout(() => {
+                            setEventLogsExpanded(false);
+                            setEventLogsSliding(false);
+                            setTimeout(() => {
+                              setEventLogsCopied(false);
+                            }, 300);
+                          }, 1500);
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                        }
+                      }}
+                    >
+                      Link Token
+                    </button>
+                  )}
+                </div>
+                <button 
+                  className={`json-copy-button expandable-icon ${eventLogsCopied ? 'copied' : ''}`}
+                  aria-label="Copy options"
+                >
+                  {eventLogsCopied ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  )}
+                </button>
+              </div>
               <div className="event-logs-scroll" ref={eventLogsRef}>
                 {linkEvents.length > 0 ? (
                   linkEvents.map((event, index) => (

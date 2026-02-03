@@ -610,9 +610,9 @@ body {
 
 .json-carbon-button.expandable-layout {
   position: sticky;
-  top: 36px;
+  top: 40px;
   float: right;
-  margin-right: -84px;
+  margin-right: -68px;
   margin-left: 8px;
   margin-bottom: -36px;
   flex-shrink: 0;
@@ -643,7 +643,7 @@ body {
 
 .expandable-menu {
   position: absolute;
-  right: 56px;
+  right: 2px;
   top: 24px;
   display: flex;
   gap: 8px;
@@ -702,7 +702,7 @@ body {
 .json-copy-button.expandable-icon {
   position: relative;
   float: none;
-  margin: 0;
+  margin: 4px 70px;
   flex-shrink: 0;
 }
 
@@ -2739,4 +2739,305 @@ body:has(.webhook-panel-container) .event-logs-scroll {
 .embedded-link-container.ready {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
+}
+
+/* View Mode Tabs for CRA Income Insights */
+.view-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  width: fit-content;
+  animation: fadeIn 0.6s ease-out 0.1s backwards;
+}
+
+.view-mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.view-mode-tab svg {
+  opacity: 0.6;
+  transition: opacity 0.3s ease;
+}
+
+.view-mode-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.view-mode-tab:hover svg {
+  opacity: 0.9;
+}
+
+.view-mode-tab.active {
+  background: linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%);
+  color: #ffffff;
+}
+
+.view-mode-tab.active svg {
+  opacity: 1;
+}
+
+/* Income Insights Visualization */
+.income-insights-visualization {
+  padding: 8px;
+  animation: fadeIn 0.7s ease-out 0.2s backwards;
+}
+
+/* Summary Cards Grid */
+.viz-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.viz-card {
+  background: linear-gradient(135deg, rgba(45, 155, 131, 0.15) 0%, rgba(26, 107, 92, 0.1) 100%);
+  border: 1px solid rgba(45, 155, 131, 0.3);
+  border-radius: 12px;
+  padding: 16px;
+  transition: all 0.3s ease;
+}
+
+.viz-card:hover {
+  background: linear-gradient(135deg, rgba(45, 155, 131, 0.2) 0%, rgba(26, 107, 92, 0.15) 100%);
+  border-color: rgba(45, 155, 131, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(45, 155, 131, 0.2);
+}
+
+.viz-card-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.viz-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 4px;
+  text-transform: capitalize;
+}
+
+.viz-card-sublabel {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Chart Containers */
+.viz-chart-container {
+  margin-bottom: 32px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.viz-chart-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 20px;
+  margin-top: 0;
+}
+
+/* Chart Tooltip */
+.viz-tooltip {
+  background: rgba(26, 26, 46, 0.98);
+  border: 1px solid rgba(45, 155, 131, 0.5);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.tooltip-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 6px;
+}
+
+.tooltip-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #2d9b83;
+  margin: 0;
+}
+
+.tooltip-transactions {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 4px 0 0 0;
+}
+
+/* Legend */
+.viz-legend {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.viz-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.viz-legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Income Source Details */
+.viz-income-source {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  transition: all 0.3s ease;
+}
+
+.viz-income-source:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.viz-source-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.viz-source-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.viz-source-status {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.viz-source-status[data-status="active"] {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+}
+
+.viz-source-status[data-status="inactive"] {
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+  color: #ffffff;
+}
+
+.viz-source-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.viz-source-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Empty State */
+.viz-empty-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 16px;
+}
+
+/* Responsive Design for Visualization */
+@media (max-width: 768px) {
+  .viz-summary-cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .viz-card {
+    padding: 12px;
+  }
+
+  .viz-card-value {
+    font-size: 20px;
+  }
+
+  .viz-chart-container {
+    padding: 16px;
+  }
+
+  .viz-chart-title {
+    font-size: 16px;
+  }
+
+  .viz-source-details {
+    grid-template-columns: 1fr;
+  }
+
+  .view-mode-tabs {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .view-mode-tab {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .viz-summary-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .viz-legend {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
 }
