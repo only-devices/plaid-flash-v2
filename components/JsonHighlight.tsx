@@ -39,16 +39,6 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
     }
   };
 
-  // Generate Carbon URL with encoded JSON
-  const carbonUrl = useMemo(() => {
-    const encodedJson = encodeURIComponent(JSON.stringify(data, null, 2));
-    return `https://carbon.now.sh/?bg=rgba%280%2C0%2C0%2C1%29&t=one-dark&wt=none&l=application%2Fjson&width=680&ds=false&dsyoff=20px&dsblur=68px&wc=true&wa=true&pv=56px&ph=56px&ln=false&fl=1&fm=Droid+Sans+Mono&fs=14px&lh=152%25&si=false&es=2x&wm=false&code=${encodedJson}`;
-  }, [data]);
-
-  const handleCarbonExport = () => {
-    window.open(carbonUrl, '_blank');
-  };
-
   const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken' | 'linkToken') => {
     if (!expandableCopy) return;
     
@@ -223,15 +213,6 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
               </svg>
             )}
           </button>
-          {!suppressCarbonButton && (
-            <button 
-              className="json-carbon-button"
-              onClick={handleCarbonExport}
-              aria-label="Export to Carbon"
-            >
-              <img src="/icons/carbon-icon.png" alt="Carbon" width="20" height="20" />
-            </button>
-          )}
         </>
       )}
       {showCopyButton && expandableCopy && (
@@ -304,15 +285,6 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
               )}
             </button>
           </div>
-          {!suppressCarbonButton && (
-            <button 
-              className="json-carbon-button expandable-layout"
-              onClick={handleCarbonExport}
-              aria-label="Export to Carbon"
-            >
-              <img src="/icons/carbon-icon.png" alt="Carbon" width="20" height="20" />
-            </button>
-          )}
         </>
       )}
       <pre className="code-block">

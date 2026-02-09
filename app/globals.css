@@ -574,51 +574,6 @@ body {
   display: block;
 }
 
-/* Carbon Export Button */
-.json-carbon-button {
-  position: sticky;
-  top: 18px;
-  float: right;
-  margin-right: 12px;
-  margin-left: 8px;
-  margin-bottom: -36px;
-  background: rgba(102, 126, 234, 0.15);
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 6px;
-  padding: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-}
-
-.json-carbon-button:hover {
-  background: rgba(102, 126, 234, 0.25);
-  border-color: rgba(102, 126, 234, 0.5);
-}
-
-.json-carbon-button:active {
-  transform: scale(0.95);
-}
-
-.json-carbon-button img {
-  display: block;
-  opacity: 0.9;
-}
-
-.json-carbon-button.expandable-layout {
-  position: sticky;
-  top: 40px;
-  float: right;
-  margin-right: -68px;
-  margin-left: 8px;
-  margin-bottom: -36px;
-  flex-shrink: 0;
-  z-index: 10;
-}
-
 /* Expandable Copy Menu */
 .json-copy-expandable {
   position: sticky;
@@ -643,10 +598,10 @@ body {
 
 .expandable-menu {
   position: absolute;
-  right: 2px;
-  top: 24px;
+  right: -12px;
+  top: 8px;
   display: flex;
-  gap: 8px;
+  gap: 4px;
   opacity: 0;
   visibility: hidden;
   max-width: 0;
@@ -673,12 +628,12 @@ body {
 .expandable-pill-button {
   background: rgba(102, 126, 234, 0.15);
   border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 6px 16px;
   cursor: pointer;
   color: #88c0d0;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 700;
   white-space: nowrap;
   transition: all 0.2s ease;
   flex-shrink: 0;
@@ -700,7 +655,6 @@ body {
 }
 
 .json-copy-button.expandable-icon {
-  position: relative;
   float: none;
   margin: 4px 70px;
   flex-shrink: 0;

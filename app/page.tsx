@@ -70,7 +70,7 @@ export default function Home() {
   const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
-  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || includePhoneNumber || bypassLink;
+  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || !includePhoneNumber || bypassLink;
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   
   // Demo Mode state
@@ -2623,9 +2623,6 @@ export default function Home() {
             <div className="callback-icon success-callback">✓</div>
             <h2>onSuccess Callback Fired!</h2>
           </div>
-          <p className="callback-description">
-            Here&apos;s the data returned from Link:
-          </p>
           <div className="account-data">
             <JsonHighlight 
               data={callbackData} 
@@ -3219,9 +3216,6 @@ export default function Home() {
             <div className="success-header">
               <h2>🟢 onEvent Callbacks</h2>
             </div>
-          <p className="callback-description">
-            Here&apos;s what went down:
-          </p>
             <div className="event-logs-wrapper">
               <div 
                 className={`json-copy-expandable ${eventLogsExpanded ? 'expanded' : ''} ${eventLogsSliding ? 'sliding' : ''}`}
