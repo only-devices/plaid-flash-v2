@@ -1964,7 +1964,28 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  max-width: 450px;
+  width: 550px;
+}
+
+.settings-webhook-url-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  outline: none;
+}
+
+.settings-webhook-url-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.settings-webhook-url-input:focus {
+  border-color: rgba(102, 126, 234, 0.65);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
 }
 
 .settings-toggle-row:hover:not(:has(.settings-toggle.disabled)) {
@@ -1976,7 +1997,8 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 .settings-toggle-row[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  left: 10%;
+  left: 50%;
+  bottom: 50%;
   transform: translateX(-50%);
   background: rgba(45, 155, 159, 0.95);
   color: #ffffff;

@@ -18,6 +18,8 @@ import { isWebhooksEnabledClient } from '@/lib/featureFlags';
 
 // Feature flag for webhooks (development-only)
 const WEBHOOKS_ENABLED = isWebhooksEnabledClient();
+const IS_DEV = process.env.NODE_ENV === 'development';
+const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
 
 type MultiItemAccessTokenInfo = {
   access_token: string;
@@ -117,6 +119,8 @@ export default function Home() {
   const [webhooks, setWebhooks] = useState<any[]>([]);
   const [showWebhookPanel, setShowWebhookPanel] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+  const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
+  const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
 
   // View mode state for CRA Income Insights
   const [viewMode, setViewMode] = useState<'json' | 'visual'>('json');
@@ -131,6 +135,8 @@ export default function Home() {
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
+  const effectiveWebhookConfigUrl = IS_DEV ? webhookUrl : (webhookUrlOverride.trim() || null);
+  const effectiveWebhookConfigUrlForSettings = IS_DEV ? webhookUrl : (tempWebhookUrlOverride.trim() || null);
 
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
@@ -221,17 +227,39 @@ export default function Home() {
     }
   }, [linkEvents]);
 
+  // Production (Vercel): load saved webhook URL override from localStorage
+  useEffect(() => {
+    if (IS_DEV) return;
+    try {
+      const saved = localStorage.getItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY);
+      if (saved) {
+        setWebhookUrlOverride(saved);
+      }
+    } catch (e) {
+      // Ignore storage errors (privacy mode, etc.)
+    }
+  }, []);
+
   // SSE connection for real-time webhook updates
   useEffect(() => {
-    // Only initialize webhooks if feature is enabled
-    if (!WEBHOOKS_ENABLED) {
-      return;
-    }
-
     let eventSource: EventSource | null = null;
 
-    // Fetch webhook URL on mount
     const initWebhooks = async () => {
+      // Check if alternative credentials are available
+      try {
+        const response = await fetch('/api/alt-credentials-check');
+        const data = await response.json();
+        setAltCredentialsAvailable(!!data.available);
+      } catch (error) {
+        console.error('Error checking alt credentials:', error);
+      }
+
+      // Only initialize webhook URL + SSE stream when feature is enabled (dev)
+      if (!WEBHOOKS_ENABLED) {
+        return;
+      }
+
+      // Fetch webhook URL on mount
       try {
         const response = await fetch('/api/webhook-url');
         const data = await response.json();
@@ -243,15 +271,6 @@ export default function Home() {
         }
       } catch (error) {
         console.error('Error fetching webhook URL:', error);
-      }
-
-      // Check if alternative credentials are available
-      try {
-        const response = await fetch('/api/alt-credentials-check');
-        const data = await response.json();
-        setAltCredentialsAvailable(data.available || false);
-      } catch (error) {
-        console.error('Error checking alt credentials:', error);
       }
 
       // Connect to SSE stream for webhook updates
@@ -455,8 +474,8 @@ export default function Home() {
       }
 
       // Add webhook URL if available (will override or add to existing options)
-      if (WEBHOOKS_ENABLED && webhookUrl) {
-        sandboxFullConfig.options.webhook = webhookUrl;
+      if (effectiveWebhookConfigUrl) {
+        sandboxFullConfig.options.webhook = effectiveWebhookConfigUrl;
       }
 
       setSandboxConfig(sandboxFullConfig);
@@ -699,8 +718,8 @@ export default function Home() {
       }
 
       // Add webhook URL if available (will override or add to existing options)
-      if (WEBHOOKS_ENABLED && webhookUrl) {
-        sandboxFullConfig.options.webhook = webhookUrl;
+      if (effectiveWebhookConfigUrl) {
+        sandboxFullConfig.options.webhook = effectiveWebhookConfigUrl;
       }
 
       // Add user_id or user_token for CRA products
@@ -767,8 +786,8 @@ export default function Home() {
     }
 
     // Add webhook URL for products that require it (and always for Multi-item Link)
-    if (WEBHOOKS_ENABLED && webhookUrl && (productConfig.requiresWebhook || multiItemLinkEnabled)) {
-      fullConfig.webhook = webhookUrl;
+    if (effectiveWebhookConfigUrl && (productConfig.requiresWebhook || multiItemLinkEnabled)) {
+      fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
     setLinkTokenConfig(fullConfig);
@@ -1214,6 +1233,7 @@ export default function Home() {
     setTempUseAltCredentials(useAltCredentials);
     setTempIncludePhoneNumber(includePhoneNumber);
     setTempBypassLink(bypassLink);
+    setTempWebhookUrlOverride(webhookUrlOverride);
     // Hide product modal and show settings modal
     setShowProductModal(false);
     setShowChildModal(false);
@@ -1245,6 +1265,21 @@ export default function Home() {
     setUseAltCredentials(tempUseAltCredentials);
     setIncludePhoneNumber(tempIncludePhoneNumber);
     setBypassLink(tempBypassLink);
+
+    // Persist production webhook URL override (dev continues to use ngrok)
+    const trimmedWebhookOverride = tempWebhookUrlOverride.trim();
+    setWebhookUrlOverride(trimmedWebhookOverride);
+    if (!IS_DEV) {
+      try {
+        if (trimmedWebhookOverride) {
+          localStorage.setItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY, trimmedWebhookOverride);
+        } else {
+          localStorage.removeItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY);
+        }
+      } catch (e) {
+        // Ignore storage errors (privacy mode, etc.)
+      }
+    }
     
     // Close settings modal
     setShowSettingsModal(false);
@@ -3459,7 +3494,7 @@ export default function Home() {
               label="Demo Mode" 
               checked={tempDemoMode} 
               onChange={handleToggleDemo} 
-              disabled={tempZapMode} 
+              disabled={tempZapMode}
             />
             <SettingsToggle 
               label="Embedded Link Mode" 
@@ -3478,6 +3513,7 @@ export default function Home() {
               checked={tempLayerMode} 
               onChange={handleToggleLayer} 
               disabled={true}
+              tooltip="Not quite yet"
             />
             <SettingsToggle 
               label="Use legacy user_token" 
@@ -3490,7 +3526,6 @@ export default function Home() {
               checked={tempUseAltCredentials} 
               onChange={handleToggleAltCredentials}
               disabled={!altCredentialsAvailable}
-              tooltip={!altCredentialsAvailable ? 'Set ALT_PLAID_CLIENT_ID and ALT_PLAID_SECRET in .env' : undefined}
             />
             <SettingsToggle 
               label="Bypass Link (Sandbox Only)" 
@@ -3502,25 +3537,34 @@ export default function Home() {
               label="Multi-item Link"
               checked={tempMultiItemLinkEnabled}
               onChange={handleToggleMultiItemLink}
-              disabled={!WEBHOOKS_ENABLED || !webhookUrl || tempBypassLink}
+              disabled={!effectiveWebhookConfigUrlForSettings || tempBypassLink}
               tooltip={
                 tempBypassLink
                   ? 'Disable Bypass Link to use Multi-item Link'
-                  : !WEBHOOKS_ENABLED
-                    ? 'Webhooks are required for Multi-item Link (dev only)'
-                    : !webhookUrl
-                      ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
-                      : undefined
+                  : !effectiveWebhookConfigUrlForSettings
+                    ? (IS_DEV
+                        ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
+                        : 'Set your webhook URL below to enable Multi-item Link')
+                    : undefined
               }
             />
-            {WEBHOOKS_ENABLED && (
-              <div className="settings-info-row">
-                <span className="settings-info-label">Webhook URL</span>
-                <span className="settings-info-value">
-                  {webhookUrl ? webhookUrl : 'Not active'}
-                </span>
-              </div>
-            )}
+            <div className="settings-info-row">
+              <span className="settings-info-label">Webhook URL</span>
+              <span className="settings-info-value">
+                {IS_DEV ? (
+                  webhookUrl ? webhookUrl : 'Not active'
+                ) : (
+                  <input
+                    className="settings-webhook-url-input"
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://your-public-webhook-url"
+                    value={tempWebhookUrlOverride}
+                    onChange={(e) => setTempWebhookUrlOverride(e.target.value)}
+                  />
+                )}
+              </span>
+            </div>
           </div>
           <div className="button-row">
             <button className="action-button button-red" onClick={handleCancelSettings}>

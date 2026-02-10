@@ -7,7 +7,7 @@ interface SettingsToggleProps {
 }
 
 export default function SettingsToggle({ label, checked, onChange, disabled, tooltip }: SettingsToggleProps) {
-  const defaultTooltip = disabled ? 'Not quite yet' : undefined;
+  const defaultTooltip = disabled ? 'Incompatible with other settings' : undefined;
   const displayTooltip = tooltip || defaultTooltip;
   
   return (
