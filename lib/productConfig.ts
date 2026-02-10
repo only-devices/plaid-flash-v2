@@ -310,7 +310,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
       {
         id: 'cra-income-insights',
         name: 'Income Insights',
-        shortName: 'Income',
+        shortName: 'Income Insights',
         products: ['cra_base_report', 'cra_income_insights'],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
@@ -334,7 +334,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
       {
         id: 'cra-partner-insights',
         name: 'Partner Insights',
-        shortName: 'Partner',
+        shortName: 'Partner Insights',
         products: ['cra_base_report', 'cra_partner_insights'],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
@@ -351,7 +351,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
       {
         id: 'cra-cashflow-insights',
         name: 'Cashflow Insights',
-        shortName: 'Cashflow',
+        shortName: 'Cashflow Insights',
         products: ['cra_base_report', 'cra_cashflow_insights'],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
@@ -368,7 +368,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
       {
         id: 'cra-cashflow-updates',
         name: 'Cashflow Updates',
-        shortName: 'Updates',
+        shortName: 'Cashflow Updates',
         products: ['cra_base_report', 'cra_monitoring'],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
