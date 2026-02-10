@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import Image from 'next/image';
 import LinkButton from '@/components/LinkButton';
@@ -28,6 +28,19 @@ type MultiItemAccessTokenInfo = {
   institution_name?: string | null;
 };
 
+type HybridStep =
+  | {
+      kind: 'accounts';
+      title: string;
+    }
+  | {
+      kind: 'product';
+      title: string;
+      productId: string;
+      apiEndpoint: string;
+      isCRA: boolean;
+    };
+
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [showButton, setShowButton] = useState(false);
@@ -42,7 +55,7 @@ export default function Home() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
-  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -69,11 +82,13 @@ export default function Home() {
   const [layerMode, setLayerMode] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [multiItemLinkEnabled, setMultiItemLinkEnabled] = useState(false);
+  const [autoRemoveEnabled, setAutoRemoveEnabled] = useState(true);
   const [tempZapMode, setTempZapMode] = useState(false);
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
   const [tempDemoMode, setTempDemoMode] = useState(false);
   const [tempMultiItemLinkEnabled, setTempMultiItemLinkEnabled] = useState(false);
+  const [tempAutoRemoveEnabled, setTempAutoRemoveEnabled] = useState(true);
   const [useLegacyUserToken, setUseLegacyUserToken] = useState(false);
   const [tempUseLegacyUserToken, setTempUseLegacyUserToken] = useState(false);
   const [useAltCredentials, setUseAltCredentials] = useState(false);
@@ -122,6 +137,16 @@ export default function Home() {
   const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
 
+  // Hybrid CRA + non-CRA flow state (CRA product selected but Link config includes non-CRA products)
+  const [hybridModeActive, setHybridModeActive] = useState(false);
+  const [hybridNonCraProducts, setHybridNonCraProducts] = useState<string[]>([]);
+  const [hybridCraProducts, setHybridCraProducts] = useState<string[]>([]);
+  const [hybridQueue, setHybridQueue] = useState<HybridStep[]>([]);
+  const [hybridStepIndex, setHybridStepIndex] = useState<number>(0);
+  const [hybridStepData, setHybridStepData] = useState<any>(null);
+  const [hybridStepStatusCode, setHybridStepStatusCode] = useState<number>(200);
+  const [hybridStepTitle, setHybridStepTitle] = useState<string>('');
+
   // View mode state for CRA Income Insights
   const [viewMode, setViewMode] = useState<'json' | 'visual'>('json');
 
@@ -137,6 +162,20 @@ export default function Home() {
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
   const effectiveWebhookConfigUrl = IS_DEV ? webhookUrl : (webhookUrlOverride.trim() || null);
   const effectiveWebhookConfigUrlForSettings = IS_DEV ? webhookUrl : (tempWebhookUrlOverride.trim() || null);
+
+  const leafProductConfigs = useMemo(() => {
+    const leafs: ProductConfig[] = [];
+    const visit = (cfg: ProductConfig) => {
+      if (cfg.apiEndpoint) {
+        leafs.push(cfg);
+      }
+      if (cfg.children) {
+        cfg.children.forEach(visit);
+      }
+    };
+    PRODUCTS_ARRAY.forEach(visit);
+    return leafs;
+  }, []);
 
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
@@ -955,6 +994,37 @@ export default function Home() {
       setLinkTokenConfig(parsed);
       setConfigError(null);
       setIsEditingConfig(false);
+
+      // Hybrid detection (CRA product selected + edited config includes any non-CRA products)
+      try {
+        const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+        const selectedCfg = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+        const isCraSelected = !!selectedCfg?.isCRA;
+
+        const productsArr = Array.isArray(parsed.products) ? parsed.products : [];
+        const requiredArr = Array.isArray(parsed.required_if_supported_products)
+          ? parsed.required_if_supported_products
+          : [];
+        const optionalArr = Array.isArray(parsed.optional_products) ? parsed.optional_products : [];
+
+        const merged = [...productsArr, ...requiredArr, ...optionalArr].filter(
+          (p): p is string => typeof p === 'string' && p.length > 0
+        );
+        const unique = Array.from(new Set(merged));
+
+        const craProducts = unique.filter((p) => p.startsWith('cra_'));
+        const nonCraProducts = unique.filter((p) => !p.startsWith('cra_'));
+
+        const hybridActive = isCraSelected && nonCraProducts.length > 0;
+        setHybridModeActive(hybridActive);
+        setHybridCraProducts(craProducts);
+        setHybridNonCraProducts(nonCraProducts);
+      } catch (e) {
+        // If parsing logic fails, default to non-hybrid
+        setHybridModeActive(false);
+        setHybridCraProducts([]);
+        setHybridNonCraProducts([]);
+      }
       
       // Proceed with link token creation
       try {
@@ -1229,6 +1299,7 @@ export default function Home() {
     setTempLayerMode(layerMode);
     setTempDemoMode(demoMode);
     setTempMultiItemLinkEnabled(multiItemLinkEnabled);
+    setTempAutoRemoveEnabled(autoRemoveEnabled);
     setTempUseLegacyUserToken(useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
     setTempIncludePhoneNumber(includePhoneNumber);
@@ -1261,6 +1332,7 @@ export default function Home() {
     setLayerMode(tempLayerMode);
     setDemoMode(tempDemoMode);
     setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
+    setAutoRemoveEnabled(tempAutoRemoveEnabled);
     setUseLegacyUserToken(tempUseLegacyUserToken);
     setUseAltCredentials(tempUseAltCredentials);
     setIncludePhoneNumber(tempIncludePhoneNumber);
@@ -1333,6 +1405,10 @@ export default function Home() {
 
   const handleToggleMultiItemLink = () => {
     setTempMultiItemLinkEnabled(!tempMultiItemLinkEnabled);
+  };
+
+  const handleToggleAutoRemove = () => {
+    setTempAutoRemoveEnabled(!tempAutoRemoveEnabled);
   };
 
   const handleToggleLegacyUserToken = () => {
@@ -1459,7 +1535,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token }),
+          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -1661,7 +1737,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token }),
+          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -1773,8 +1849,49 @@ export default function Home() {
     
     // Check if this is a CRA product
     if (productConfig?.isCRA) {
-      // CRA products: skip access_token exchange, show product API preview
+      // CRA products: if hybrid is active, run exchange + sequential flow; otherwise keep existing CRA flow
       try {
+        if (hybridModeActive) {
+          const credsFlag = usedAltCredentials || useAltCredentials;
+          const { public_token } = callbackData || {};
+
+          if (!public_token) {
+            throw new Error('Missing public_token for token exchange');
+          }
+
+          // Exchange public token for access token
+          setModalState('processing-accounts');
+          setShowModal(true);
+
+          const exchangeResponse = await fetch('/api/exchange-public-token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+          });
+
+          const exchangeJson = await exchangeResponse.json();
+          if (!exchangeResponse.ok) {
+            setErrorData(exchangeJson);
+            setApiStatusCode(exchangeResponse.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          const access_token: string = exchangeJson.access_token;
+          setAccessToken(access_token);
+
+          const steps = buildHybridQueue(linkTokenConfig);
+          setHybridQueue(steps);
+          setHybridStepIndex(0);
+
+          // Execute first step (accounts/get)
+          await executeHybridStep(0, access_token, steps);
+          return;
+        }
+
         if (!productConfig.apiEndpoint) {
           throw new Error('Product API endpoint not configured');
         }
@@ -1870,7 +1987,10 @@ export default function Home() {
         }
 
         // Build request body with access token and any additional params
-        const requestBody = buildProductRequestBody({ access_token }, productConfig);
+        const requestBody = buildProductRequestBody(
+          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+          productConfig
+        );
         
         const productResponse = await fetch(productConfig.apiEndpoint, {
           method: 'POST',
@@ -1900,7 +2020,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token }),
+          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -2012,7 +2132,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token: demoAccessToken }),
+          body: JSON.stringify({ access_token: demoAccessToken, useAltCredentials: usedAltCredentials || useAltCredentials }),
         });
 
         accountsData = await accountsResponse.json();
@@ -2160,6 +2280,14 @@ export default function Home() {
     setShowWebhookPanel(false);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
+    setHybridModeActive(false);
+    setHybridNonCraProducts([]);
+    setHybridCraProducts([]);
+    setHybridQueue([]);
+    setHybridStepIndex(0);
+    setHybridStepData(null);
+    setHybridStepTitle('');
+    setHybridStepStatusCode(200);
     // Clear link token and selected products to prevent auto-opening
     setLinkToken(null);
     setSelectedProduct(null);
@@ -2379,22 +2507,105 @@ export default function Home() {
     setShowChildModal(false);
     setShowGrandchildModal(false);
     
-    // Clean up Plaid item if access token exists
-    if (accessToken || demoAccessToken) {
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    const credsFlag = usedAltCredentials || useAltCredentials;
+    const shouldRemoveUser = hybridModeActive || productConfig?.isCRA;
+
+    // If auto-remove is disabled, bypass deletion and return to main menu
+    if (!autoRemoveEnabled) {
+      // Reset to product selection screen without reloading
+      setShowModal(false);
+      setAccountsData(null);
+      setProductData(null);
+      setCallbackData(null);
+      setAccessToken(null);
+      setMultiItemAccessTokens([]);
+      setActiveMultiItemAccessTokenIndex(0);
+      setHybridModeActive(false);
+      setHybridNonCraProducts([]);
+      setHybridCraProducts([]);
+      setHybridQueue([]);
+      setHybridStepIndex(0);
+      setHybridStepData(null);
+      setHybridStepTitle('');
+      setHybridStepStatusCode(200);
+      setSelectedProduct(null);
+      setSelectedChildProduct(null);
+      setSelectedGrandchildProduct(null);
+      setLinkToken(null);
+      setLinkEvents([]);
+      setShowEventLogs(false);
+      setModalState('loading');
+      setShowButton(false);
+      setShowWelcome(false);
+      setShowProductModal(true);
+      setErrorData(null);
+      setErrorMessage('');
+
+      // Reset Demo Mode state completely
+      setDemoMode(false);
+      setDemoLinkCompleted(false);
+      setDemoAccessToken(null);
+      setShowDemoProductsModal(false);
+      setDemoProductsVisibility({});
+
+      // Reset CRA state
+      setUserCreateConfig(null);
+      setUserId(null);
+      setUserToken(null);
+      setIsEditingUserCreateConfig(false);
+      setEditedUserCreateConfig('');
+      setUserCreateConfigError(null);
+
+      // Reset webhook panel (but keep SSE connection open)
+      setShowWebhookPanel(false);
+      setWebhooks([]);
+
+      // Reset embedded Link state
+      setEmbeddedLinkActive(false);
+      setEmbeddedInstitutionSelected(false);
+      setEmbeddedLinkReady(false);
+      if (embeddedLinkHandlerRef.current?.destroy) {
+        embeddedLinkHandlerRef.current.destroy();
+        embeddedLinkHandlerRef.current = null;
+      }
+      return;
+    }
+
+    // Clean up Plaid user (CRA/hybrid) or item (non-CRA-only)
+    if (shouldRemoveUser ? (userId || userToken) : (accessToken || demoAccessToken)) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       
       try {
-        await fetch('/api/item-remove', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ access_token: accessToken || demoAccessToken }),
-        });
+        if (shouldRemoveUser) {
+          await fetch('/api/user-remove', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              user_token: userToken,
+              useAltCredentials: credsFlag,
+            }),
+          });
+        } else {
+          await fetch('/api/item-remove', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              access_token: accessToken || demoAccessToken,
+              useAltCredentials: credsFlag,
+            }),
+          });
+        }
       } catch (error) {
-        console.error('Error removing item:', error);
+        console.error('Error tidying up:', error);
         // Continue with reset even if cleanup fails
       }
     }
@@ -2407,6 +2618,14 @@ export default function Home() {
     setAccessToken(null);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
+    setHybridModeActive(false);
+    setHybridNonCraProducts([]);
+    setHybridCraProducts([]);
+    setHybridQueue([]);
+    setHybridStepIndex(0);
+    setHybridStepData(null);
+    setHybridStepTitle('');
+    setHybridStepStatusCode(200);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
     setSelectedGrandchildProduct(null);
@@ -2451,22 +2670,82 @@ export default function Home() {
 
   const handleZapReset = async () => {
     // Zap Mode reset: clean up and return to product selection
-    if (accessToken) {
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    const credsFlag = usedAltCredentials || useAltCredentials;
+    const shouldRemoveUser = hybridModeActive || productConfig?.isCRA;
+
+    if (!autoRemoveEnabled) {
+      // Skip deletion entirely and just reset UI
+      // Reset to product selection
+      setShowModal(false);
+      setAccountsData(null);
+      setProductData(null);
+      setCallbackData(null);
+      setAccessToken(null);
+      setMultiItemAccessTokens([]);
+      setActiveMultiItemAccessTokenIndex(0);
+      setHybridModeActive(false);
+      setHybridNonCraProducts([]);
+      setHybridCraProducts([]);
+      setHybridQueue([]);
+      setHybridStepIndex(0);
+      setHybridStepData(null);
+      setHybridStepTitle('');
+      setHybridStepStatusCode(200);
+      setSelectedProduct(null);
+      setSelectedChildProduct(null);
+      setSelectedGrandchildProduct(null);
+      setLinkToken(null);
+      setLinkEvents([]);
+      setShowEventLogs(false);
+      setShowZapResetButton(false);
+      setModalState('loading');
+      setShowButton(false);
+      setShowWelcome(false);
+      setShowProductModal(true);
+
+      // Reset embedded Link state
+      setEmbeddedLinkActive(false);
+      setEmbeddedInstitutionSelected(false);
+      setEmbeddedLinkReady(false);
+      if (embeddedLinkHandlerRef.current?.destroy) {
+        embeddedLinkHandlerRef.current.destroy();
+        embeddedLinkHandlerRef.current = null;
+      }
+      return;
+    }
+
+    if (shouldRemoveUser ? (userId || userToken) : accessToken) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       setShowZapResetButton(false);
       
       try {
-        await fetch('/api/item-remove', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ access_token: accessToken }),
-        });
+        if (shouldRemoveUser) {
+          await fetch('/api/user-remove', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              user_token: userToken,
+              useAltCredentials: credsFlag,
+            }),
+          });
+        } else {
+          await fetch('/api/item-remove', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ access_token: accessToken, useAltCredentials: credsFlag }),
+          });
+        }
       } catch (error) {
-        console.error('Error removing item:', error);
+        console.error('Error tidying up:', error);
       }
     }
 
@@ -2478,6 +2757,14 @@ export default function Home() {
     setAccessToken(null);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
+    setHybridModeActive(false);
+    setHybridNonCraProducts([]);
+    setHybridCraProducts([]);
+    setHybridQueue([]);
+    setHybridStepIndex(0);
+    setHybridStepData(null);
+    setHybridStepTitle('');
+    setHybridStepStatusCode(200);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
     setSelectedGrandchildProduct(null);
@@ -2699,6 +2986,193 @@ export default function Home() {
       setModalState('error');
       setShowModal(true);
     }
+  };
+
+  const pickNonCraLeafConfigsForHybrid = (config: any, nonCraProductStrings: string[]) => {
+    const picked: ProductConfig[] = [];
+    const seen = new Set<string>();
+
+    const idToCfg = new Map<string, ProductConfig>();
+    leafProductConfigs.forEach((c) => idToCfg.set(c.id, c));
+
+    const isTransactionsSync = !!config?.transactions?.days_requested;
+
+    for (const p of nonCraProductStrings) {
+      let cfg: ProductConfig | undefined;
+
+      if (p === 'transactions') {
+        cfg = idToCfg.get(isTransactionsSync ? 'transactions-sync' : 'transactions-get');
+      } else {
+        cfg = leafProductConfigs.find((c) => !c.isCRA && c.products.includes(p));
+      }
+
+      if (cfg?.apiEndpoint && !seen.has(cfg.apiEndpoint)) {
+        seen.add(cfg.apiEndpoint);
+        picked.push(cfg);
+      }
+    }
+
+    return picked;
+  };
+
+  const pickCraLeafConfigsForHybrid = (craProductStrings: string[]) => {
+    const craSet = new Set(craProductStrings);
+    const candidates = leafProductConfigs.filter(
+      (c) => !!c.isCRA && c.products.length > 0 && c.products.every((p) => craSet.has(p))
+    );
+
+    // Remove less-specific subsets (e.g. base report if income insights is present)
+    const filtered = candidates.filter((cfg) => {
+      return !candidates.some((other) => {
+        if (other === cfg) return false;
+        if (other.products.length <= cfg.products.length) return false;
+        return cfg.products.every((p) => other.products.includes(p));
+      });
+    });
+
+    // Preserve stable traversal order based on leafProductConfigs
+    const filteredSet = new Set(filtered.map((c) => c.id));
+    return leafProductConfigs.filter((c) => filteredSet.has(c.id));
+  };
+
+  const buildHybridQueue = (config: any) => {
+    const nonCraCfgs = pickNonCraLeafConfigsForHybrid(config, hybridNonCraProducts);
+    const craCfgs = pickCraLeafConfigsForHybrid(hybridCraProducts);
+
+    const steps: HybridStep[] = [{ kind: 'accounts', title: '/accounts/get Response' }];
+
+    nonCraCfgs.forEach((cfg) => {
+      steps.push({
+        kind: 'product',
+        title: `${cfg.apiTitle || cfg.name} Response`,
+        productId: cfg.id,
+        apiEndpoint: cfg.apiEndpoint!,
+        isCRA: false,
+      });
+    });
+
+    craCfgs.forEach((cfg) => {
+      steps.push({
+        kind: 'product',
+        title: `${cfg.apiTitle || cfg.name} Response`,
+        productId: cfg.id,
+        apiEndpoint: cfg.apiEndpoint!,
+        isCRA: true,
+      });
+    });
+
+    return steps;
+  };
+
+  const executeHybridStep = async (
+    index: number,
+    accessTokenOverride?: string,
+    queueOverride?: HybridStep[]
+  ) => {
+    const queueToUse = queueOverride || hybridQueue;
+    const step = queueToUse[index];
+    if (!step) return;
+
+    const credsFlag = usedAltCredentials || useAltCredentials;
+    const tokenToUse = accessTokenOverride || accessToken;
+
+    try {
+      if (step.kind === 'accounts') {
+        setHybridStepTitle(step.title);
+        setModalState('processing-accounts');
+        setShowModal(true);
+
+        if (!tokenToUse) {
+          throw new Error('No access_token available for accounts/get');
+        }
+
+        const accountsResponse = await fetch('/api/accounts-get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: tokenToUse, useAltCredentials: credsFlag }),
+        });
+        const accountsJson = await accountsResponse.json();
+        if (accountsResponse.status >= 400) {
+          setErrorData(accountsJson);
+          setApiStatusCode(accountsResponse.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        setAccountsData(accountsJson);
+        setHybridStepData(accountsJson);
+        setHybridStepStatusCode(accountsResponse.status);
+        setModalState('hybrid-step');
+        setShowModal(true);
+        return;
+      }
+
+      // Product step
+      const productCfg = getProductConfigById(step.productId);
+      if (!productCfg?.apiEndpoint) {
+        throw new Error('Product API endpoint not configured');
+      }
+
+      setHybridStepTitle(step.title);
+      setModalState('processing-product');
+      setShowModal(true);
+
+      let requestBody: any = { useAltCredentials: credsFlag };
+
+      if (step.isCRA) {
+        if (usedUserToken && userToken) {
+          requestBody.user_token = userToken;
+        } else if (userId) {
+          requestBody.user_id = userId;
+        } else if (userToken) {
+          requestBody.user_token = userToken;
+        } else {
+          throw new Error('Missing user_id/user_token for CRA call');
+        }
+        requestBody = buildProductRequestBody(requestBody, productCfg);
+      } else {
+        if (!tokenToUse) {
+          throw new Error('Missing access_token for non-CRA call');
+        }
+        requestBody.access_token = tokenToUse;
+        requestBody = buildProductRequestBody(requestBody, productCfg, accountsData);
+      }
+
+      const productResponse = await fetch(productCfg.apiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      const productJson = await productResponse.json();
+      if (productResponse.status >= 400) {
+        setErrorData(productJson);
+        setApiStatusCode(productResponse.status);
+        setModalState('api-error');
+        setShowModal(true);
+        return;
+      }
+
+      setHybridStepData(productJson);
+      setHybridStepStatusCode(productResponse.status);
+      setModalState('hybrid-step');
+      setShowModal(true);
+    } catch (error) {
+      console.error('[Hybrid] Error executing step:', error);
+      setErrorMessage('We encountered an issue. Please try again.');
+      setModalState('error');
+      setShowModal(true);
+    }
+  };
+
+  const handleHybridNext = async () => {
+    const nextIndex = hybridStepIndex + 1;
+    if (nextIndex >= hybridQueue.length) {
+      handleStartOver();
+      return;
+    }
+    setHybridStepIndex(nextIndex);
+    await executeHybridStep(nextIndex);
   };
 
   const handleSelectMultiItemAccessToken = async (nextIndex: number) => {
@@ -3108,7 +3582,42 @@ export default function Home() {
             />
           </div>
           <div className="modal-button-row single-button">
-            <ArrowButton variant="blue" onClick={handleCallProduct} />
+            <ArrowButton variant="blue" onClick={hybridModeActive && productConfig?.isCRA ? handleHybridNext : handleCallProduct} />
+          </div>
+        </div>
+      );
+    }
+
+    if (modalState === 'hybrid-step' && hybridStepData) {
+      const currentHybridStep = hybridQueue[hybridStepIndex];
+      const currentHybridProductConfig =
+        currentHybridStep?.kind === 'product' ? getProductConfigById(currentHybridStep.productId) : undefined;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <div className="success-icon">✓</div>
+            <h2>{hybridStepTitle}</h2>
+            {hybridStepStatusCode && <span className="status-code">{hybridStepStatusCode}</span>}
+          </div>
+          <div className="account-data">
+            <JsonHighlight
+              data={hybridStepData}
+              highlightKeys={currentHybridProductConfig?.highlightKeys}
+              expandableCopy={{
+                responseData: hybridStepData,
+                accessToken: accessToken,
+                userId: userId,
+                userToken: userToken,
+                isCRA: true,
+              }}
+            />
+          </div>
+          <div className="modal-button-row single-button">
+            <ArrowButton
+              variant="blue"
+              onClick={hybridStepIndex >= hybridQueue.length - 1 ? handleStartOver : handleHybridNext}
+            />
           </div>
         </div>
       );
@@ -3547,6 +4056,12 @@ export default function Home() {
                         : 'Set your webhook URL below to enable Multi-item Link')
                     : undefined
               }
+            />
+            <SettingsToggle
+              label="Remove items and users automatically"
+              checked={tempAutoRemoveEnabled}
+              onChange={handleToggleAutoRemove}
+              disabled={false}
             />
             <div className="settings-info-row">
               <span className="settings-info-label">Webhook URL</span>

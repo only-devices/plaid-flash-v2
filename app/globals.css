@@ -1965,6 +1965,7 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   overflow: hidden;
   white-space: nowrap;
   width: 550px;
+  text-align: right;
 }
 
 .settings-webhook-url-input {
@@ -2094,7 +2095,7 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 
 .settings-toggle-row:has(.settings-toggle.disabled) {
   cursor: not-allowed;
-  opacity: 0.3;
+  opacity: 0.8;
 }
 
 .settings-toggle-row:has(.settings-toggle.disabled):hover {
