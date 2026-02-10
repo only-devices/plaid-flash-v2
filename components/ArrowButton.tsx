@@ -1,4 +1,5 @@
 interface ArrowButtonProps {
+  disabled?: boolean;
   onClick: () => void;
   variant?: 'blue' | 'red' | 'purple' | 'green';
   direction?: 'forward' | 'back';
@@ -6,6 +7,7 @@ interface ArrowButtonProps {
 }
 
 export default function ArrowButton({ 
+  disabled = false,
   onClick, 
   variant = 'blue', 
   direction = 'forward',
@@ -15,6 +17,7 @@ export default function ArrowButton({
     <button 
       className={`arrow-button arrow-button-${variant} arrow-button-${direction}`}
       onClick={onClick}
+      disabled={disabled}
     >
       {direction === 'back' ? (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

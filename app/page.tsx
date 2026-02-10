@@ -11,12 +11,20 @@ import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
 import WebhookPanel from '@/components/WebhookPanel';
+import MultiItemWebhookPanel from '@/components/MultiItemWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
 import { isWebhooksEnabledClient } from '@/lib/featureFlags';
 
 // Feature flag for webhooks (development-only)
 const WEBHOOKS_ENABLED = isWebhooksEnabledClient();
+
+type MultiItemAccessTokenInfo = {
+  access_token: string;
+  item_id?: string | null;
+  institution_id?: string | null;
+  institution_name?: string | null;
+};
 
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
@@ -30,6 +38,8 @@ export default function Home() {
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
+  const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
   const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
@@ -56,10 +66,12 @@ export default function Home() {
   const [embeddedMode, setEmbeddedMode] = useState(false);
   const [layerMode, setLayerMode] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [multiItemLinkEnabled, setMultiItemLinkEnabled] = useState(false);
   const [tempZapMode, setTempZapMode] = useState(false);
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
   const [tempDemoMode, setTempDemoMode] = useState(false);
+  const [tempMultiItemLinkEnabled, setTempMultiItemLinkEnabled] = useState(false);
   const [useLegacyUserToken, setUseLegacyUserToken] = useState(false);
   const [tempUseLegacyUserToken, setTempUseLegacyUserToken] = useState(false);
   const [useAltCredentials, setUseAltCredentials] = useState(false);
@@ -70,7 +82,7 @@ export default function Home() {
   const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
-  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || useLegacyUserToken || useAltCredentials || !includePhoneNumber || bypassLink;
+  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || multiItemLinkEnabled || useLegacyUserToken || useAltCredentials || !includePhoneNumber || bypassLink;
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   
   // Demo Mode state
@@ -115,6 +127,10 @@ export default function Home() {
   const [embeddedLinkReady, setEmbeddedLinkReady] = useState(false);
   const embeddedContainerRef = useRef<HTMLDivElement>(null);
   const embeddedLinkHandlerRef = useRef<any>(null);
+
+  const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+  const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+  const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
 
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
@@ -407,8 +423,8 @@ export default function Home() {
       return;
     }
 
-    // For CRA products, show user create modal first
-    if (productConfig.isCRA) {
+    // For CRA products (and Multi-item Link), show user create modal first
+    if (productConfig.isCRA || multiItemLinkEnabled) {
       showUserCreatePreview(productId);
       return;
     }
@@ -496,8 +512,16 @@ export default function Home() {
 
     // Build the /user/create configuration based on legacy toggle
     let userConfig: any;
+
+    // Multi-item Link (non-CRA): /user/create only needs client_user_id
+    // Keep CRA behavior unchanged.
+    const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig.isCRA;
     
-    if (useLegacyUserToken) {
+    if (isNonCraMultiItemUserCreate) {
+      userConfig = {
+        client_user_id: 'multi_item_user_' + Date.now(),
+      };
+    } else if (useLegacyUserToken) {
       // Legacy format using consumer_report_user_identity
       userConfig = {
         client_user_id: 'flash_cra_user_' + Date.now(),
@@ -563,17 +587,29 @@ export default function Home() {
       const configToUse = configOverride || userCreateConfig;
       
       console.log('[Frontend] Creating user with useAltCredentials:', useAltCredentials);
+
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
       
       const response = await fetch('/api/user-create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...configToUse,
-          useLegacyUserToken,
-          useAltCredentials
-        }),
+        body: JSON.stringify(
+          isNonCraMultiItemUserCreate
+            ? {
+                // Non-CRA Multi-item: only client_user_id is required
+                client_user_id: configToUse?.client_user_id || 'multi_item_user_' + Date.now(),
+                useAltCredentials,
+              }
+            : {
+                ...configToUse,
+                useLegacyUserToken,
+                useAltCredentials,
+              }
+        ),
       });
       
       const data = await response.json();
@@ -595,7 +631,12 @@ export default function Home() {
       
       // When using legacy mode (user_token), clear user_id and vice versa
       // to ensure only one parameter is available for subsequent calls
-      if (useLegacyUserToken) {
+      if (isNonCraMultiItemUserCreate) {
+        // Multi-item non-CRA: always use user_id
+        setUserId(newUserId);
+        setUserToken(null);
+        setUsedUserToken(false);
+      } else if (useLegacyUserToken) {
         // Legacy mode: only store user_token
         setUserId(null);
         setUserToken(newUserToken);
@@ -685,15 +726,22 @@ export default function Home() {
       return;
     }
 
-    // Build the FULL configuration for CRA products
+    // Build the FULL configuration for CRA products (and Multi-item Link, when enabled)
     const fullConfig: any = {
       link_customization_name: 'flash',
-      user: { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01', phone_number: '+14155550011' },
+      user: includePhoneNumber
+        ? { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01', phone_number: '+14155550011' }
+        : { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01' },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
       language: 'en'
     };
+
+    // Enable Multi-item Link whenever the global toggle is on
+    if (multiItemLinkEnabled) {
+      fullConfig.enable_multi_item_link = true;
+    }
 
     // Add user_id or user_token based on legacy toggle
     // When legacy toggle is enabled, prioritize user_token over user_id
@@ -718,8 +766,8 @@ export default function Home() {
       Object.assign(fullConfig, productConfig.additionalLinkParams);
     }
 
-    // Add webhook URL for products that require it
-    if (WEBHOOKS_ENABLED && productConfig.requiresWebhook && webhookUrl) {
+    // Add webhook URL for products that require it (and always for Multi-item Link)
+    if (WEBHOOKS_ENABLED && webhookUrl && (productConfig.requiresWebhook || multiItemLinkEnabled)) {
       fullConfig.webhook = webhookUrl;
     }
 
@@ -1161,8 +1209,10 @@ export default function Home() {
     setTempEmbeddedMode(embeddedMode);
     setTempLayerMode(layerMode);
     setTempDemoMode(demoMode);
+    setTempMultiItemLinkEnabled(multiItemLinkEnabled);
     setTempUseLegacyUserToken(useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
+    setTempIncludePhoneNumber(includePhoneNumber);
     setTempBypassLink(bypassLink);
     // Hide product modal and show settings modal
     setShowProductModal(false);
@@ -1190,6 +1240,7 @@ export default function Home() {
     setEmbeddedMode(tempEmbeddedMode);
     setLayerMode(tempLayerMode);
     setDemoMode(tempDemoMode);
+    setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
     setUseLegacyUserToken(tempUseLegacyUserToken);
     setUseAltCredentials(tempUseAltCredentials);
     setIncludePhoneNumber(tempIncludePhoneNumber);
@@ -1243,6 +1294,10 @@ export default function Home() {
     if (newValue) {
       setTempZapMode(false);
     }
+  };
+
+  const handleToggleMultiItemLink = () => {
+    setTempMultiItemLinkEnabled(!tempMultiItemLinkEnabled);
   };
 
   const handleToggleLegacyUserToken = () => {
@@ -1634,6 +1689,15 @@ export default function Home() {
     // Hide the button
     setShowButton(false);
     
+    // Multi-item Link: do not show onSuccess screen for non-CRA products (tokens come from LINK webhooks)
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
+    if (isMultiItemNonCra) {
+      setShowWebhookPanel(false);
+      return;
+    }
+
     if (zapMode) {
       // Zap Mode: skip callback modal, go directly to API calls
       handleZapModeSuccess(public_token, metadata);
@@ -1647,13 +1711,12 @@ export default function Home() {
         metadata
       });
       // Show webhook panel only for products that require webhooks (CRA products)
-      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-      const productConfig = getProductConfigById(effectiveProductId!);
+      // When multi-item is enabled for CRA products, keep CRA flow but do NOT show the webhook modal.
       if (WEBHOOKS_ENABLED && webhookUrl && productConfig?.requiresWebhook) {
         setShowWebhookPanel(true);
       }
     }
-  }, [zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct]);
+  }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct]);
 
   const handleProceedWithSuccess = async () => {
     // Start fade-out animation for both modals
@@ -1980,6 +2043,34 @@ export default function Home() {
     // Hide button
     setShowButton(false);
     
+    // Multi-item Link: for non-CRA products, do not show onExit screen; return to product selection
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
+    if (isMultiItemNonCra) {
+      setShowModal(false);
+      setShowEventLogs(false);
+      setEventLogsPosition('right');
+      setIsTransitioningModals(false);
+      setCallbackData(null);
+      setModalState('loading');
+      setShowButton(false);
+      setShowWelcome(false);
+      setShowWebhookPanel(false);
+      setAccountsData(null);
+      setProductData(null);
+      setAccessToken(null);
+      setMultiItemAccessTokens([]);
+      setActiveMultiItemAccessTokenIndex(0);
+      setLinkToken(null);
+      setSelectedProduct(null);
+      setSelectedChildProduct(null);
+      setSelectedGrandchildProduct(null);
+      setLinkEvents([]);
+      setShowProductModal(true);
+      return;
+    }
+
     if (!zapMode) {
       // Default mode: slide event logs to the left (Link's position)
       setEventLogsPosition('left');
@@ -1994,13 +2085,12 @@ export default function Home() {
     });
     // Show webhook panel only for products that require webhooks (CRA products), except in Zap mode
     if (!zapMode) {
-      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-      const productConfig = getProductConfigById(effectiveProductId!);
+      // When multi-item is enabled for CRA products, keep CRA flow but do NOT show the webhook modal.
       if (WEBHOOKS_ENABLED && webhookUrl && productConfig?.requiresWebhook) {
         setShowWebhookPanel(true);
       }
     }
-  }, [zapMode, selectedChildProduct, selectedProduct]);
+  }, [multiItemLinkEnabled, zapMode, selectedChildProduct, selectedProduct]);
 
   const onEvent = useCallback((eventName: string, metadata: any) => {
     // Add event to the logs
@@ -2033,6 +2123,8 @@ export default function Home() {
     setShowButton(true);
     setShowWelcome(false);
     setShowWebhookPanel(false);
+    setMultiItemAccessTokens([]);
+    setActiveMultiItemAccessTokenIndex(0);
     // Clear link token and selected products to prevent auto-opening
     setLinkToken(null);
     setSelectedProduct(null);
@@ -2278,6 +2370,8 @@ export default function Home() {
     setProductData(null);
     setCallbackData(null);
     setAccessToken(null);
+    setMultiItemAccessTokens([]);
+    setActiveMultiItemAccessTokenIndex(0);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
     setSelectedGrandchildProduct(null);
@@ -2347,6 +2441,8 @@ export default function Home() {
     setProductData(null);
     setCallbackData(null);
     setAccessToken(null);
+    setMultiItemAccessTokens([]);
+    setActiveMultiItemAccessTokenIndex(0);
     setSelectedProduct(null);
     setSelectedChildProduct(null);
     setSelectedGrandchildProduct(null);
@@ -2408,6 +2504,251 @@ export default function Home() {
     }
   };
 
+  const handleMultiItemForward = async (publicTokens: string[]) => {
+    try {
+      if (!isMultiItemFlowActive) {
+        return;
+      }
+      if (!publicTokens || publicTokens.length === 0) {
+        throw new Error('No public_tokens found to exchange');
+      }
+
+      // Hide onEvent + webhook viewers and show processing state
+      setShowEventLogs(false);
+      setShowWebhookPanel(false);
+      setModalState('processing-accounts');
+      setShowModal(true);
+
+      const credsFlag = usedAltCredentials || useAltCredentials;
+
+      const tokenInfos = await Promise.all(
+        publicTokens.map(async (public_token) => {
+          const exchangeResponse = await fetch('/api/exchange-public-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+          });
+
+          const exchangeData = await exchangeResponse.json();
+          if (!exchangeResponse.ok) {
+            throw exchangeData;
+          }
+
+          const access_token: string = exchangeData.access_token;
+
+          // Enrich with institution info (best-effort)
+          let item_id: string | null = null;
+          let institution_id: string | null = null;
+          let institution_name: string | null = null;
+
+          try {
+            const itemResponse = await fetch('/api/item-get', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token, useAltCredentials: credsFlag }),
+            });
+            const itemData = await itemResponse.json();
+            if (itemResponse.ok) {
+              item_id = itemData.item_id ?? null;
+              institution_id = itemData.institution_id ?? null;
+            }
+
+            if (institution_id) {
+              const instResponse = await fetch('/api/institutions-get-by-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  institution_id,
+                  country_codes: ['US'],
+                  useAltCredentials: credsFlag,
+                }),
+              });
+              const instData = await instResponse.json();
+              if (instResponse.ok) {
+                institution_name = instData.institution_name ?? instData.institution?.name ?? null;
+              }
+            }
+          } catch (e) {
+            // Best-effort enrichment only
+          }
+
+          return { access_token, item_id, institution_id, institution_name } satisfies MultiItemAccessTokenInfo;
+        })
+      );
+
+      setMultiItemAccessTokens(tokenInfos);
+      setActiveMultiItemAccessTokenIndex(0);
+
+      // Default to the first access token downstream
+      const activeAccessToken = tokenInfos[0]?.access_token;
+      if (!activeAccessToken) {
+        throw new Error('No access_token returned from exchange');
+      }
+      setAccessToken(activeAccessToken);
+
+      // Continue with existing downstream flow (accounts/get -> product flow)
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      if (!productConfig) {
+        throw new Error('Product configuration not found');
+      }
+
+      // CRA products still use user_id/user_token downstream
+      if (productConfig.isCRA) {
+        const baseParams: any = {
+          useAltCredentials: credsFlag,
+        };
+        if (usedUserToken && userToken) {
+          baseParams.user_token = userToken;
+        } else if (userId) {
+          baseParams.user_id = userId;
+        } else if (userToken) {
+          baseParams.user_token = userToken;
+        }
+
+        const requestBody = buildProductRequestBody(baseParams, productConfig);
+        setProductApiConfig(requestBody);
+        setModalState('preview-product-api');
+        return;
+      }
+
+      const skipAccountsGet = effectiveProductId === 'signal-balance';
+      if (!skipAccountsGet) {
+        const accountsResponse = await fetch('/api/accounts-get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: activeAccessToken, useAltCredentials: credsFlag }),
+        });
+        const accountsJson = await accountsResponse.json();
+        if (accountsResponse.status >= 400) {
+          setErrorData(accountsJson);
+          setApiStatusCode(accountsResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        setAccountsData(accountsJson);
+        setApiStatusCode(accountsResponse.status);
+        setModalState('accounts-data');
+      } else {
+        // For Signal Balance, skip accounts/get and go straight to product API call
+        setModalState('processing-product');
+
+        if (!productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+
+        const requestBody = buildProductRequestBody(
+          { access_token: activeAccessToken, useAltCredentials: credsFlag },
+          productConfig
+        );
+
+        const productResponse = await fetch(productConfig.apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        const productJson = await productResponse.json();
+        if (productResponse.status >= 400) {
+          setErrorData(productJson);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        setProductData(productJson);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+      }
+    } catch (error: any) {
+      console.error('[Multi-item Link] Error processing Forward:', error);
+      setErrorMessage('We encountered an issue. Please try again.');
+      setModalState('error');
+      setShowModal(true);
+    }
+  };
+
+  const handleSelectMultiItemAccessToken = async (nextIndex: number) => {
+    try {
+      if (!Number.isFinite(nextIndex) || nextIndex < 0 || nextIndex >= multiItemAccessTokens.length) {
+        return;
+      }
+
+      const next = multiItemAccessTokens[nextIndex];
+      if (!next?.access_token) return;
+
+      const credsFlag = usedAltCredentials || useAltCredentials;
+
+      setActiveMultiItemAccessTokenIndex(nextIndex);
+      setAccessToken(next.access_token);
+      setAccountsData(null);
+      setProductData(null);
+
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = getProductConfigById(effectiveProductId!);
+      if (!productConfig) {
+        throw new Error('Product configuration not found');
+      }
+
+      // Re-run the downstream flow with the selected token
+      setModalState('processing-accounts');
+      setShowModal(true);
+
+      const skipAccountsGet = effectiveProductId === 'signal-balance';
+      if (!skipAccountsGet) {
+        const accountsResponse = await fetch('/api/accounts-get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: next.access_token, useAltCredentials: credsFlag }),
+        });
+        const accountsJson = await accountsResponse.json();
+        if (accountsResponse.status >= 400) {
+          setErrorData(accountsJson);
+          setApiStatusCode(accountsResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        setAccountsData(accountsJson);
+        setApiStatusCode(accountsResponse.status);
+        setModalState('accounts-data');
+      } else {
+        setModalState('processing-product');
+
+        if (!productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+
+        const requestBody = buildProductRequestBody(
+          { access_token: next.access_token, useAltCredentials: credsFlag },
+          productConfig
+        );
+
+        const productResponse = await fetch(productConfig.apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        const productJson = await productResponse.json();
+        if (productResponse.status >= 400) {
+          setErrorData(productJson);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        setProductData(productJson);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+      }
+    } catch (error) {
+      console.error('[Multi-item Link] Error switching access_token:', error);
+      setErrorMessage('We encountered an issue. Please try again.');
+      setModalState('error');
+      setShowModal(true);
+    }
+  };
+
+  const getMultiItemTokenLabel = (info: MultiItemAccessTokenInfo, index: number) => {
+    return info.institution_name || info.institution_id || info.item_id || `Item ${index + 1}`;
+  };
+
   const renderModalContent = () => {
     // CRA: User Create Preview Modal
     if (modalState === 'preview-user-create' && userCreateConfig) {
@@ -2424,7 +2765,7 @@ export default function Home() {
             <>
               <div className="account-data config-data-with-edit">
                 <button 
-                  className="config-edit-icon" 
+                  className="config-edit-button" 
                   onClick={handleToggleUserCreateEditMode}
                   title="Edit configuration"
                 >
@@ -2488,18 +2829,18 @@ export default function Home() {
       // Check if this is a CRA product to modify the back button behavior
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
-      const isCRA = productConfig?.isCRA;
+      const requiresUserCreateStep = !!productConfig?.isCRA || multiItemLinkEnabled;
       
       return (
         <div className="modal-success">
           <div className="success-header">
-            <h2>{isCRA ? 'Step 2: ' : ''}Here&apos;s the /link/token/create configuration that will be used:</h2>
+            <h2>{requiresUserCreateStep ? 'Step 2: ' : ''}Here&apos;s the /link/token/create configuration that will be used:</h2>
           </div>
           {!isEditingConfig ? (
             <>
               <div className="account-data config-data-with-edit">
                 <button 
-                  className="config-edit-icon" 
+                  className="config-edit-button" 
                   onClick={handleToggleEditMode}
                   title="Edit configuration"
                 >
@@ -2511,7 +2852,7 @@ export default function Home() {
                 <JsonHighlight data={linkTokenConfig} />
               </div>
               <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={isCRA ? handleGoBackToUserCreate : handleGoBackToProducts} />
+                <ArrowButton variant="red" direction="back" onClick={requiresUserCreateStep ? handleGoBackToUserCreate : handleGoBackToProducts} />
                 <ArrowButton variant="blue" onClick={() => handleProceedWithConfig(linkTokenConfig)} />
               </div>
             </>
@@ -2541,7 +2882,7 @@ export default function Home() {
                 )}
               </div>
               <div className="modal-button-row two-buttons">
-                <ArrowButton variant="red" direction="back" onClick={isCRA ? handleCancelEdit : handleCancelEdit} />
+                <ArrowButton variant="red" direction="back" onClick={handleCancelEdit} />
                 <ArrowButton variant="blue" onClick={handleSaveAndProceed} />
               </div>
             </>
@@ -2565,7 +2906,7 @@ export default function Home() {
             <>
               <div className="account-data config-data-with-edit">
                 <button 
-                  className="config-edit-icon" 
+                  className="config-edit-button" 
                   onClick={handleToggleSandboxConfigEditMode}
                   title="Edit configuration"
                 >
@@ -2700,6 +3041,20 @@ export default function Home() {
           <div className="success-header">
             <div className="success-icon">✓</div>
             <h2>/accounts/get Response</h2>
+            {multiItemLinkEnabled && !productConfig?.isCRA && multiItemAccessTokens.length > 1 && (
+              <select
+                className="access-token-picker"
+                value={activeMultiItemAccessTokenIndex}
+                onChange={(e) => handleSelectMultiItemAccessToken(Number(e.target.value))}
+                aria-label="Select access token"
+              >
+                {multiItemAccessTokens.map((info, idx) => (
+                  <option key={idx} value={idx}>
+                    {getMultiItemTokenLabel(info, idx)}
+                  </option>
+                ))}
+              </select>
+            )}
             {demoLinkCompleted && (
               <button className="reset-icon-button" onClick={handleStartOver} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2819,7 +3174,7 @@ export default function Home() {
               <>
                 <div className="account-data config-data-with-edit">
                   <button 
-                    className="config-edit-icon" 
+                    className="config-edit-button" 
                     onClick={handleToggleEditProductApiMode}
                     title="Edit configuration"
                   >
@@ -2929,6 +3284,20 @@ export default function Home() {
           <div className="success-header">
             <div className="success-icon">✓</div>
             <h2>{apiTitle} Response</h2>
+            {multiItemLinkEnabled && !isCRA && multiItemAccessTokens.length > 1 && (
+              <select
+                className="access-token-picker"
+                value={activeMultiItemAccessTokenIndex}
+                onChange={(e) => handleSelectMultiItemAccessToken(Number(e.target.value))}
+                aria-label="Select access token"
+              >
+                {multiItemAccessTokens.map((info, idx) => (
+                  <option key={idx} value={idx}>
+                    {getMultiItemTokenLabel(info, idx)}
+                  </option>
+                ))}
+              </select>
+            )}
             {demoLinkCompleted && (
               <button className="reset-icon-button" onClick={handleStartOver} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -3129,6 +3498,21 @@ export default function Home() {
               onChange={handleToggleBypassLink}
               disabled={false}
             />
+            <SettingsToggle
+              label="Multi-item Link"
+              checked={tempMultiItemLinkEnabled}
+              onChange={handleToggleMultiItemLink}
+              disabled={!WEBHOOKS_ENABLED || !webhookUrl || tempBypassLink}
+              tooltip={
+                tempBypassLink
+                  ? 'Disable Bypass Link to use Multi-item Link'
+                  : !WEBHOOKS_ENABLED
+                    ? 'Webhooks are required for Multi-item Link (dev only)'
+                    : !webhookUrl
+                      ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
+                      : undefined
+              }
+            />
             {WEBHOOKS_ENABLED && (
               <div className="settings-info-row">
                 <span className="settings-info-label">Webhook URL</span>
@@ -3210,11 +3594,11 @@ export default function Home() {
       )}
       
       {/* Event Logs Modal - Shows side by side with Plaid Link */}
-      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''}`}>
+      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''} ${isMultiItemFlowActive ? 'multiitem' : ''}`}>
         <div className="event-logs-modal">
           <div className="modal-success">
             <div className="success-header">
-              <h2>🟢 onEvent Callbacks</h2>
+              <h3>🟢 onEvent Callbacks</h3>
             </div>
             <div className="event-logs-wrapper">
               <div 
@@ -3306,6 +3690,14 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {/* Multi-item Link webhook viewer (inline, under onEvent logs) */}
+        <MultiItemWebhookPanel
+          enabled={isMultiItemFlowActive}
+          linkToken={linkToken}
+          webhooks={webhooks}
+          onForward={handleMultiItemForward}
+        />
       </div>
       
       {/* Callback Modal Container - Shows on the right when event logs slide left */}

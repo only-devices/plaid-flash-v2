@@ -364,17 +364,17 @@ body {
   position: relative;
 }
 
-.config-edit-icon {
+.config-edit-button {
   position: sticky;
-  top: 18px;
+  top: 10px;
   float: right;
-  margin-right: 12px;
-  margin-bottom: -36px;
-  width: 40px;
-  height: 40px;
+  margin-right: 56px;
+  margin-bottom: -48px;
+  width: 36px;
+  height: 36px;
   background: rgba(102, 126, 234, 0.2);
   border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 10px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -384,18 +384,16 @@ body {
   z-index: 9;
 }
 
-.config-edit-icon:hover {
-  background: rgba(102, 126, 234, 0.3);
+.config-edit-button:hover {
+  background: rgba(102, 126, 234, 0.25);
   border-color: rgba(102, 126, 234, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  transform: scale(1.05);
+}
+.config-edit-button:active {
+  transform: scale(0.95);
 }
 
-.config-edit-icon:active {
-  transform: translateY(0);
-}
-
-.config-edit-icon svg {
+.config-edit-button svg {
   display: block;
 }
 
@@ -531,10 +529,12 @@ body {
 
 .json-copy-button {
   position: sticky;
-  top: 18px;
+  top: 10px;
   float: right;
   margin-right: 12px;
-  margin-bottom: -36px;
+  margin-bottom: -48px;
+  width: 36px;
+  height: 36px;
   background: rgba(102, 126, 234, 0.15);
   border: 1px solid rgba(102, 126, 234, 0.3);
   border-radius: 6px;
@@ -577,10 +577,12 @@ body {
 /* Expandable Copy Menu */
 .json-copy-expandable {
   position: sticky;
-  top: 18px;
+  top: 10px;
   float: right;
   margin-right: 68px;
-  margin-bottom: -36px;
+  margin-bottom: -48px;
+  width: 36px;
+  height: 36px;
   z-index: 10;
   width: 48px;
   height: 48px;
@@ -698,8 +700,8 @@ body {
 
 /* Arrow Buttons */
 .arrow-button {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -718,6 +720,11 @@ body {
 
 .arrow-button:active {
   transform: translateY(-2px);
+}
+
+.arrow-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .arrow-button svg {
@@ -1358,7 +1365,6 @@ body {
 
 /* Event Logs Positioning - Left (slides to Link's position after callback) */
 .event-logs-container.event-logs-left {
-  left: 30%;
   right: auto;
   transform: translate(calc(-50% - 40px), -50%);
   width: 900px;
@@ -1375,7 +1381,6 @@ body {
 /* Callback Modal Container - Positioned on the right (where event logs were) */
 .callback-modal-container {
   position: fixed;
-  right: 30%;
   top: 50%;
   transform: translate(calc(50% + 40px), -50%);
   width: 900px;
@@ -1443,7 +1448,6 @@ body {
 /* Event logs wrapper with copy button */
 .event-logs-wrapper {
   position: relative;
-  margin: 24px 0;
 }
 
 .event-logs-copy-button {
@@ -1496,7 +1500,6 @@ body {
   margin-bottom: 0px;
   border-radius: 12px;
   max-height: 500px;
-  padding-top: 48px;
 }
 
 /* Event logs scrollbar styling - matches account-data */
@@ -2308,6 +2311,130 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 
 /* Webhook Panel Styles */
 
+/* Multi-item Link: stack onEvent logs + inline webhook viewer */
+.event-logs-container.multiitem {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.event-logs-container.multiitem .event-logs-modal {
+  min-height: unset;
+  height: 420px;
+}
+
+.event-logs-container.multiitem .event-logs-modal .modal-success {
+  min-height: 0;
+}
+
+.event-logs-container.multiitem .event-logs-scroll {
+  max-height: 280px;
+}
+
+/* Inline webhook viewer under onEvent logs */
+.multiitem-webhook-panel {
+  background: rgba(26, 26, 46, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 24px;
+  padding: 24px 32px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  height: 380px;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.multiitem-webhook-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #ffffff;
+}
+
+.multiitem-webhook-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.multiitem-webhook-panel-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.multiitem-webhook-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.multiitem-webhook-panel-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+}
+
+.multiitem-webhook-panel-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.multiitem-webhook-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
+  border-radius: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+/* Event logs scrollbar styling - matches account-data */
+.multiitem-webhook-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.multiitem-webhook-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+}
+
+.multiitem-webhook-scroll::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 10px;
+}
+
+.multiitem-webhook-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
+}
+
+/* Access token picker (multi-item) */
+.access-token-picker {
+  margin-left: auto;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+
+.access-token-picker option {
+  color: #0b0b16;
+}
+
 /* When webhook panel is visible, shift top panels up */
 body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
   top: 32%;
@@ -2461,7 +2588,7 @@ body:has(.webhook-panel-container) .event-logs-scroll {
 
 .webhook-copy-button {
   position: absolute;
-  top: 18px;
+  top: 10px;
   right: 12px;
   background: rgba(102, 126, 234, 0.15);
   border: 1px solid rgba(102, 126, 234, 0.3);

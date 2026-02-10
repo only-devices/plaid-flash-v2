@@ -298,9 +298,12 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         apiEndpoint: '/api/cra-base-report-get',
         apiTitle: '/cra/check_report/base_report/get',
         isCRA: true,
-        highlightKeys: ['report'],
+        highlightKeys: [],
         additionalLinkParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+          cra_options: {
+            days_requested: 365
+          }
         },
         requiresWebhook: true
       },
