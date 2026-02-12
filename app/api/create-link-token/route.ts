@@ -70,7 +70,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(data, { status: response.status });
     }
 
-    return NextResponse.json({ link_token: data.link_token });
+    return NextResponse.json({
+      link_token: data.link_token,
+      ...(data.hosted_link_url ? { hosted_link_url: data.hosted_link_url } : {})
+    });
   } catch (error: any) {
     console.error('Error creating link token:', error);
     return NextResponse.json(

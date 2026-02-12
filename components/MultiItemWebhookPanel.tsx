@@ -15,6 +15,8 @@ interface MultiItemWebhookPanelProps {
   linkToken: string | null;
   webhooks: AnyWebhookEvent[];
   onForward: (publicTokens: string[]) => void;
+  title?: string;
+  allowForwardWithoutTokens?: boolean;
 }
 
 function formatTimestamp(timestamp?: string) {
@@ -33,6 +35,8 @@ export default function MultiItemWebhookPanel({
   linkToken,
   webhooks,
   onForward,
+  title = 'Webhooks',
+  allowForwardWithoutTokens = false,
 }: MultiItemWebhookPanelProps) {
   const relevantWebhooks = useMemo(() => {
     if (!enabled) return [];
@@ -73,6 +77,9 @@ export default function MultiItemWebhookPanel({
     }
 
     if (!Array.isArray(publicTokens) || publicTokens.length === 0) {
+      if (allowForwardWithoutTokens) {
+        return { canForward: true, reason: '', publicTokens: [] as string[] };
+      }
       return { canForward: false, reason: 'No public_tokens found', publicTokens: [] as string[] };
     }
 
@@ -85,7 +92,7 @@ export default function MultiItemWebhookPanel({
     <div className="multiitem-webhook-panel">
       <div className="multiitem-webhook-panel-header">
         <div className="multiitem-webhook-panel-title">
-          <h3>Webhooks</h3>
+          <h3>{title}</h3>
           {relevantWebhooks.length > 0 && (
             <span className="webhook-count">{relevantWebhooks.length}</span>
           )}

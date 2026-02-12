@@ -55,7 +55,7 @@ export default function Home() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
-  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hosted-waiting' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -82,12 +82,14 @@ export default function Home() {
   const [layerMode, setLayerMode] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [multiItemLinkEnabled, setMultiItemLinkEnabled] = useState(false);
+  const [hostedLinkEnabled, setHostedLinkEnabled] = useState(false);
   const [autoRemoveEnabled, setAutoRemoveEnabled] = useState(true);
   const [tempZapMode, setTempZapMode] = useState(false);
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
   const [tempDemoMode, setTempDemoMode] = useState(false);
   const [tempMultiItemLinkEnabled, setTempMultiItemLinkEnabled] = useState(false);
+  const [tempHostedLinkEnabled, setTempHostedLinkEnabled] = useState(false);
   const [tempAutoRemoveEnabled, setTempAutoRemoveEnabled] = useState(true);
   const [useLegacyUserToken, setUseLegacyUserToken] = useState(false);
   const [tempUseLegacyUserToken, setTempUseLegacyUserToken] = useState(false);
@@ -156,6 +158,14 @@ export default function Home() {
   const [embeddedLinkReady, setEmbeddedLinkReady] = useState(false);
   const embeddedContainerRef = useRef<HTMLDivElement>(null);
   const embeddedLinkHandlerRef = useRef<any>(null);
+
+  // Hosted Link state
+  const [hostedLinkActive, setHostedLinkActive] = useState(false);
+  const [hostedLinkUrl, setHostedLinkUrl] = useState<string | null>(null);
+  const [hostedLinkManualPayload, setHostedLinkManualPayload] = useState<string>('');
+  const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
+  const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
+  const hostedLinkPopupRef = useRef<Window | null>(null);
 
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
@@ -386,6 +396,14 @@ export default function Home() {
       
       // Check for API errors
       if (response.status >= 400) {
+        if (hostedLinkEnabled) {
+          try {
+            hostedLinkPopupRef.current?.close();
+          } catch {
+            // ignore
+          }
+          hostedLinkPopupRef.current = null;
+        }
         setErrorData(data);
         setApiStatusCode(response.status);
         setModalState('api-error');
@@ -395,6 +413,43 @@ export default function Home() {
       }
       
       setLinkToken(data.link_token);
+
+      if (hostedLinkEnabled) {
+        if (data.hosted_link_url) {
+          setHostedLinkActive(true);
+          setHostedLinkUrl(data.hosted_link_url);
+          setHostedLinkManualPayload('');
+          setHostedLinkManualParseError(null);
+          setHostedLinkExtractedPublicTokens([]);
+          setShowEventLogs(false);
+          setShowWebhookPanel(false);
+          setModalState('hosted-waiting');
+          setShowModal(true);
+          window.open(data.hosted_link_url, '_blank', 'noopener,noreferrer');
+        } else {
+          // Avoid a blank screen if Plaid doesn't return hosted_link_url
+          if (hostedLinkEnabled) {
+            try {
+              hostedLinkPopupRef.current?.close();
+            } catch {
+              // ignore
+            }
+            hostedLinkPopupRef.current = null;
+          }
+          setHostedLinkActive(false);
+          setHostedLinkUrl(null);
+          setErrorData({
+            error_code: 'HOSTED_LINK_URL_MISSING',
+            error_message:
+              'Hosted Link is enabled, but Plaid did not return hosted_link_url from /link/token/create. Ensure the request includes hosted_link: {}.',
+            link_token: data.link_token,
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+          setShowModal(true);
+          setShowWelcome(false);
+        }
+      }
     } catch (error) {
       console.error('Error fetching link token:', error);
       setErrorMessage('Failed to initialize. Please try again.');
@@ -549,6 +604,14 @@ export default function Home() {
     // Add additional link params if they exist (e.g., days_requested for transactions sync)
     if (productConfig.additionalLinkParams) {
       Object.assign(fullConfig, productConfig.additionalLinkParams);
+    }
+
+    // Hosted Link enablement
+    if (hostedLinkEnabled) {
+      fullConfig.hosted_link = {};
+      if (effectiveWebhookConfigUrl) {
+        fullConfig.webhook = effectiveWebhookConfigUrl;
+      }
     }
 
     setLinkTokenConfig(fullConfig);
@@ -801,6 +864,11 @@ export default function Home() {
       fullConfig.enable_multi_item_link = true;
     }
 
+    // Hosted Link enablement
+    if (hostedLinkEnabled) {
+      fullConfig.hosted_link = {};
+    }
+
     // Add user_id or user_token based on legacy toggle
     // When legacy toggle is enabled, prioritize user_token over user_id
     if (useLegacyUserToken && effectiveUserToken) {
@@ -826,6 +894,11 @@ export default function Home() {
 
     // Add webhook URL for products that require it (and always for Multi-item Link)
     if (effectiveWebhookConfigUrl && (productConfig.requiresWebhook || multiItemLinkEnabled)) {
+      fullConfig.webhook = effectiveWebhookConfigUrl;
+    }
+
+    // Hosted Link relies on webhooks to deliver public_token
+    if (hostedLinkEnabled && effectiveWebhookConfigUrl) {
       fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
@@ -886,6 +959,33 @@ export default function Home() {
     }
     
     try {
+      // Hosted Link: open a placeholder tab synchronously to avoid popup blockers,
+      // and show the waiting UI immediately so the user isn't left on a blank screen.
+      if (hostedLinkEnabled) {
+        try {
+          const popup = window.open('about:blank', '_blank');
+          if (popup) {
+            // Best-effort hardening
+            (popup as any).opener = null;
+            hostedLinkPopupRef.current = popup;
+          } else {
+            hostedLinkPopupRef.current = null;
+          }
+        } catch {
+          hostedLinkPopupRef.current = null;
+        }
+
+        setHostedLinkActive(true);
+        setHostedLinkUrl(null);
+        setHostedLinkManualPayload('');
+        setHostedLinkManualParseError(null);
+        setHostedLinkExtractedPublicTokens([]);
+        setShowEventLogs(false);
+        setShowWebhookPanel(false);
+        setModalState('hosted-waiting');
+        setShowModal(true);
+      }
+
       // Use the configOverride if provided (Zap Mode), otherwise use linkTokenConfig state
       const configToUse = configOverride || linkTokenConfig;
       const response = await fetch('/api/create-link-token', {
@@ -909,6 +1009,45 @@ export default function Home() {
       }
       
       setLinkToken(data.link_token);
+
+      if (hostedLinkEnabled) {
+        if (data.hosted_link_url) {
+          setHostedLinkActive(true);
+          setHostedLinkUrl(data.hosted_link_url);
+          setHostedLinkManualPayload('');
+          setHostedLinkManualParseError(null);
+          setHostedLinkExtractedPublicTokens([]);
+          setShowEventLogs(false);
+          setShowWebhookPanel(false);
+          setModalState('hosted-waiting');
+          setShowModal(true);
+
+          // Navigate the placeholder tab if we have one; otherwise try opening (may be blocked)
+          try {
+            if (hostedLinkPopupRef.current) {
+              hostedLinkPopupRef.current.location.href = data.hosted_link_url;
+            } else {
+              window.open(data.hosted_link_url, '_blank');
+            }
+          } catch {
+            // User can still open via the UI
+          }
+        } else {
+          // Avoid a blank screen if Plaid doesn't return hosted_link_url
+          setHostedLinkActive(false);
+          setHostedLinkUrl(null);
+          setErrorData({
+            error_code: 'HOSTED_LINK_URL_MISSING',
+            error_message:
+              'Hosted Link is enabled, but Plaid did not return hosted_link_url from /link/token/create. Ensure the request includes hosted_link: {}.',
+            link_token: data.link_token,
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+          setShowModal(true);
+          setShowWelcome(false);
+        }
+      }
     } catch (error) {
       console.error('Error fetching link token:', error);
       setErrorMessage('Failed to initialize. Please try again.');
@@ -989,6 +1128,32 @@ export default function Home() {
       
       // Close modal immediately to avoid showing read-only view
       setShowModal(false);
+
+      // Hosted Link: open a placeholder tab synchronously (user gesture) to avoid popup blockers.
+      // We'll navigate it once we receive hosted_link_url.
+      if (hostedLinkEnabled) {
+        try {
+          const popup = window.open('about:blank', '_blank');
+          if (popup) {
+            (popup as any).opener = null;
+            hostedLinkPopupRef.current = popup;
+          } else {
+            hostedLinkPopupRef.current = null;
+          }
+        } catch {
+          hostedLinkPopupRef.current = null;
+        }
+
+        setHostedLinkActive(true);
+        setHostedLinkUrl(null);
+        setHostedLinkManualPayload('');
+        setHostedLinkManualParseError(null);
+        setHostedLinkExtractedPublicTokens([]);
+        setShowEventLogs(false);
+        setShowWebhookPanel(false);
+        setModalState('hosted-waiting');
+        setShowModal(true);
+      }
       
       // Update config and reset edit state
       setLinkTokenConfig(parsed);
@@ -1040,6 +1205,14 @@ export default function Home() {
         
         // Check for API errors
         if (response.status >= 400) {
+          if (hostedLinkEnabled) {
+            try {
+              hostedLinkPopupRef.current?.close();
+            } catch {
+              // ignore
+            }
+            hostedLinkPopupRef.current = null;
+          }
           setErrorData(data);
           setApiStatusCode(response.status);
           setModalState('api-error');
@@ -1049,6 +1222,51 @@ export default function Home() {
         }
         
         setLinkToken(data.link_token);
+
+        if (hostedLinkEnabled) {
+          if (data.hosted_link_url) {
+            setHostedLinkActive(true);
+            setHostedLinkUrl(data.hosted_link_url);
+            setHostedLinkManualPayload('');
+            setHostedLinkManualParseError(null);
+            setHostedLinkExtractedPublicTokens([]);
+            setShowEventLogs(false);
+            setShowWebhookPanel(false);
+            setModalState('hosted-waiting');
+            setShowModal(true);
+            try {
+              if (hostedLinkPopupRef.current) {
+                hostedLinkPopupRef.current.location.href = data.hosted_link_url;
+              } else {
+                window.open(data.hosted_link_url, '_blank');
+              }
+            } catch {
+              // User can still open via the UI
+            }
+          } else {
+            // Avoid a blank screen if Plaid doesn't return hosted_link_url
+            if (hostedLinkEnabled) {
+              try {
+                hostedLinkPopupRef.current?.close();
+              } catch {
+                // ignore
+              }
+              hostedLinkPopupRef.current = null;
+            }
+            setHostedLinkActive(false);
+            setHostedLinkUrl(null);
+            setErrorData({
+              error_code: 'HOSTED_LINK_URL_MISSING',
+              error_message:
+                'Hosted Link is enabled, but Plaid did not return hosted_link_url from /link/token/create. Ensure the request includes hosted_link: {}.',
+              link_token: data.link_token,
+            });
+            setApiStatusCode(500);
+            setModalState('api-error');
+            setShowModal(true);
+            setShowWelcome(false);
+          }
+        }
       } catch (error) {
         console.error('Error fetching link token:', error);
         setErrorMessage('Failed to initialize. Please try again.');
@@ -1299,6 +1517,7 @@ export default function Home() {
     setTempLayerMode(layerMode);
     setTempDemoMode(demoMode);
     setTempMultiItemLinkEnabled(multiItemLinkEnabled);
+    setTempHostedLinkEnabled(hostedLinkEnabled);
     setTempAutoRemoveEnabled(autoRemoveEnabled);
     setTempUseLegacyUserToken(useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
@@ -1332,6 +1551,7 @@ export default function Home() {
     setLayerMode(tempLayerMode);
     setDemoMode(tempDemoMode);
     setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
+    setHostedLinkEnabled(tempHostedLinkEnabled);
     setAutoRemoveEnabled(tempAutoRemoveEnabled);
     setUseLegacyUserToken(tempUseLegacyUserToken);
     setUseAltCredentials(tempUseAltCredentials);
@@ -1405,6 +1625,28 @@ export default function Home() {
 
   const handleToggleMultiItemLink = () => {
     setTempMultiItemLinkEnabled(!tempMultiItemLinkEnabled);
+  };
+
+  const handleToggleHostedLink = () => {
+    setTempHostedLinkEnabled(!tempHostedLinkEnabled);
+  };
+
+  const parseHostedLinkSessionFinished = (payloadText: string) => {
+    const parsed = JSON.parse(payloadText);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Invalid JSON');
+    }
+    const webhookType = parsed.webhook_type || parsed.webhookType;
+    const webhookCode = parsed.webhook_code || parsed.webhookCode;
+    if (webhookType !== 'LINK' || webhookCode !== 'SESSION_FINISHED') {
+      throw new Error('Expected a LINK/SESSION_FINISHED payload');
+    }
+    const tokens: string[] = Array.isArray(parsed.public_tokens)
+      ? parsed.public_tokens
+      : parsed.public_token
+        ? [parsed.public_token]
+        : [];
+    return tokens.filter((t) => typeof t === 'string' && t.length > 0);
   };
 
   const handleToggleAutoRemove = () => {
@@ -2419,7 +2661,7 @@ export default function Home() {
   useEffect(() => {
     // In Demo Mode, we can open Link without a selected product
     // In normal mode, we need a selected product
-    const shouldOpenLink = ready && linkToken && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
+    const shouldOpenLink = ready && linkToken && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
       (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
@@ -2478,7 +2720,7 @@ export default function Home() {
     const products = Array.from(productsSet);
     
     // Create Link token config with dynamically built products
-    const demoConfig = {
+    const demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
         ? { client_user_id: 'flash_user_id01' }
@@ -2491,6 +2733,13 @@ export default function Home() {
       country_codes: ['US'],
       language: 'en'
     };
+
+    if (hostedLinkEnabled) {
+      demoConfig.hosted_link = {};
+      if (effectiveWebhookConfigUrl) {
+        demoConfig.webhook = effectiveWebhookConfigUrl;
+      }
+    }
     
     // Set flag that we're starting demo mode
     setIsDemoModeStarting(true);
@@ -2506,6 +2755,13 @@ export default function Home() {
     setShowProductModal(false);
     setShowChildModal(false);
     setShowGrandchildModal(false);
+
+    // Reset Hosted Link waiting UI
+    setHostedLinkActive(false);
+    setHostedLinkUrl(null);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setHostedLinkExtractedPublicTokens([]);
     
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
@@ -2675,6 +2931,13 @@ export default function Home() {
     const credsFlag = usedAltCredentials || useAltCredentials;
     const shouldRemoveUser = hybridModeActive || productConfig?.isCRA;
 
+    // Reset Hosted Link waiting UI
+    setHostedLinkActive(false);
+    setHostedLinkUrl(null);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setHostedLinkExtractedPublicTokens([]);
+
     if (!autoRemoveEnabled) {
       // Skip deletion entirely and just reset UI
       // Reset to product selection
@@ -2826,11 +3089,8 @@ export default function Home() {
     }
   };
 
-  const handleMultiItemForward = async (publicTokens: string[]) => {
+  const exchangePublicTokensAndProceed = async (publicTokens: string[]) => {
     try {
-      if (!isMultiItemFlowActive) {
-        return;
-      }
       if (!publicTokens || publicTokens.length === 0) {
         throw new Error('No public_tokens found to exchange');
       }
@@ -2981,11 +3241,16 @@ export default function Home() {
         setModalState('success');
       }
     } catch (error: any) {
-      console.error('[Multi-item Link] Error processing Forward:', error);
+      console.error('[Token Exchange] Error processing Forward:', error);
       setErrorMessage('We encountered an issue. Please try again.');
       setModalState('error');
       setShowModal(true);
     }
+  };
+
+  const handleMultiItemForward = async (publicTokens: string[]) => {
+    if (!isMultiItemFlowActive) return;
+    await exchangePublicTokensAndProceed(publicTokens);
   };
 
   const pickNonCraLeafConfigsForHybrid = (config: any, nonCraProductStrings: string[]) => {
@@ -3175,6 +3440,80 @@ export default function Home() {
     await executeHybridStep(nextIndex);
   };
 
+  const handleHostedLinkForward = async (publicTokens: string[]) => {
+    try {
+      setHostedLinkActive(false);
+      setHostedLinkUrl(null);
+
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+
+      // Hybrid: exchange (use first public_token) then run the hybrid queue
+      if (hybridModeActive) {
+        const credsFlag = usedAltCredentials || useAltCredentials;
+        const firstToken = publicTokens?.[0];
+        if (!firstToken) {
+          throw new Error('Missing public_token for hybrid flow');
+        }
+
+        setModalState('processing-accounts');
+        setShowModal(true);
+
+        const exchangeResponse = await fetch('/api/exchange-public-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_token: firstToken, useAltCredentials: credsFlag }),
+        });
+        const exchangeJson = await exchangeResponse.json();
+        if (!exchangeResponse.ok) {
+          setErrorData(exchangeJson);
+          setApiStatusCode(exchangeResponse.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        const access_token: string = exchangeJson.access_token;
+        setAccessToken(access_token);
+
+        const steps = buildHybridQueue(linkTokenConfig);
+        setHybridQueue(steps);
+        setHybridStepIndex(0);
+        await executeHybridStep(0, access_token, steps);
+        return;
+      }
+
+      // CRA-only: proceed with CRA flow (no token exchange required)
+      if (productConfig?.isCRA) {
+        if (!productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+        const baseParams: any = { useAltCredentials: usedAltCredentials || useAltCredentials };
+        if (usedUserToken && userToken) {
+          baseParams.user_token = userToken;
+        } else if (userId) {
+          baseParams.user_id = userId;
+        } else if (userToken) {
+          baseParams.user_token = userToken;
+        }
+
+        const requestBody = buildProductRequestBody(baseParams, productConfig);
+        setProductApiConfig(requestBody);
+        setModalState('preview-product-api');
+        setShowModal(true);
+        return;
+      }
+
+      // Non-CRA: exchange all tokens and continue standard flow (supports multi-item)
+      await exchangePublicTokensAndProceed(publicTokens);
+    } catch (error) {
+      console.error('[Hosted Link] Error processing Forward:', error);
+      setErrorMessage('We encountered an issue. Please try again.');
+      setModalState('error');
+      setShowModal(true);
+    }
+  };
+
   const handleSelectMultiItemAccessToken = async (nextIndex: number) => {
     try {
       if (!Number.isFinite(nextIndex) || nextIndex < 0 || nextIndex >= multiItemAccessTokens.length) {
@@ -3188,8 +3527,6 @@ export default function Home() {
 
       setActiveMultiItemAccessTokenIndex(nextIndex);
       setAccessToken(next.access_token);
-      setAccountsData(null);
-      setProductData(null);
 
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
@@ -3197,7 +3534,67 @@ export default function Home() {
         throw new Error('Product configuration not found');
       }
 
-      // Re-run the downstream flow with the selected token
+      const isViewingProductSuccess = modalState === 'success' && !!productData && !!productConfig.apiEndpoint;
+
+      // If the user is currently looking at a product response, re-run THAT same endpoint with the new token
+      // (instead of bouncing them back through /accounts/get + accounts screen).
+      if (isViewingProductSuccess) {
+        setModalState('processing-product');
+        setShowModal(true);
+
+        const baseBody: any = productApiConfig && typeof productApiConfig === 'object' ? { ...productApiConfig } : {};
+        baseBody.access_token = next.access_token;
+        baseBody.useAltCredentials = credsFlag;
+
+        // If the current request uses account_id (or the product is known to need it), refresh it for the new Item.
+        const needsAccountId =
+          typeof baseBody.account_id === 'string' ||
+          effectiveProductId === 'signal-evaluate' ||
+          effectiveProductId === 'signal-balance';
+
+        if (needsAccountId) {
+          const accountsResponse = await fetch('/api/accounts-get', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: next.access_token, useAltCredentials: credsFlag }),
+          });
+          const accountsJson = await accountsResponse.json();
+          if (accountsResponse.status >= 400) {
+            setErrorData(accountsJson);
+            setApiStatusCode(accountsResponse.status);
+            setModalState('api-error');
+            return;
+          }
+          setAccountsData(accountsJson);
+
+          const firstAccountId = accountsJson?.accounts?.[0]?.account_id;
+          if (typeof firstAccountId === 'string' && firstAccountId.length > 0) {
+            baseBody.account_id = firstAccountId;
+          }
+        }
+
+        const productResponse = await fetch(productConfig.apiEndpoint!, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(baseBody),
+        });
+        const productJson = await productResponse.json();
+        if (productResponse.status >= 400) {
+          setErrorData(productJson);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          return;
+        }
+        setProductData(productJson);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+        return;
+      }
+
+      // Otherwise, fall back to the standard downstream flow with the selected token.
+      setAccountsData(null);
+      setProductData(null);
+
       setModalState('processing-accounts');
       setShowModal(true);
 
@@ -3632,6 +4029,112 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'hosted-waiting') {
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+      const allowForwardWithoutTokens = !!productConfig?.isCRA && !hybridModeActive;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Hosted Link</h2>
+          </div>
+
+          {hostedLinkUrl && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                className="action-button button-blue"
+                onClick={() => {
+                  try {
+                    window.open(hostedLinkUrl, '_blank');
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                Open Hosted Link
+              </button>
+            </div>
+          )}
+
+          {IS_DEV ? (
+            <MultiItemWebhookPanel
+              enabled={true}
+              linkToken={linkToken}
+              webhooks={webhooks}
+              onForward={handleHostedLinkForward}
+              title="Webhooks"
+              allowForwardWithoutTokens={allowForwardWithoutTokens}
+            />
+          ) : (
+            <>
+              <div className="account-data">
+                <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+                  Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
+                </p>
+                <textarea
+                  value={hostedLinkManualPayload}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setHostedLinkManualPayload(text);
+                    if (!text.trim()) {
+                      setHostedLinkManualParseError(null);
+                      setHostedLinkExtractedPublicTokens([]);
+                      return;
+                    }
+                    try {
+                      const tokens = parseHostedLinkSessionFinished(text);
+                      setHostedLinkExtractedPublicTokens(tokens);
+                      setHostedLinkManualParseError(null);
+                    } catch (err: any) {
+                      setHostedLinkExtractedPublicTokens([]);
+                      setHostedLinkManualParseError(err?.message || 'Invalid payload');
+                    }
+                  }}
+                  rows={10}
+                  style={{
+                    width: '100%',
+                    minHeight: 220,
+                    background: 'rgba(0, 0, 0, 0.25)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: 12,
+                    color: 'rgba(255, 255, 255, 0.9)',
+                    padding: 12,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    fontSize: 12,
+                    resize: 'vertical',
+                  }}
+                  placeholder='{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'
+                />
+                {hostedLinkManualParseError && (
+                  <div className="config-error" style={{ marginTop: 10 }}>
+                    {hostedLinkManualParseError}
+                  </div>
+                )}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <button
+                  className="action-button button-red"
+                  onClick={() => {
+                    setHostedLinkManualPayload('');
+                    setHostedLinkManualParseError(null);
+                    setHostedLinkExtractedPublicTokens([]);
+                  }}
+                >
+                  Clear
+                </button>
+                <ArrowButton
+                  variant="blue"
+                  onClick={() => handleHostedLinkForward(hostedLinkExtractedPublicTokens)}
+                  disabled={!allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
     if (modalState === 'processing-product') {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
@@ -4056,6 +4559,13 @@ export default function Home() {
                         : 'Set your webhook URL below to enable Multi-item Link')
                     : undefined
               }
+            />
+            <SettingsToggle
+              label="Hosted Link"
+              checked={tempHostedLinkEnabled}
+              onChange={handleToggleHostedLink}
+              disabled={!effectiveWebhookConfigUrlForSettings}
+              tooltip={!effectiveWebhookConfigUrlForSettings ? 'Set your webhook URL below to enable Hosted Link' : undefined}
             />
             <SettingsToggle
               label="Remove items and users automatically"
