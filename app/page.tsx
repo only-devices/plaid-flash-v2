@@ -55,7 +55,7 @@ export default function Home() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
-  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hosted-waiting' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hosted-waiting' | 'update-mode-input' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -101,7 +101,6 @@ export default function Home() {
   const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
-  const hasCustomSettings = zapMode || embeddedMode || layerMode || demoMode || multiItemLinkEnabled || useLegacyUserToken || useAltCredentials || !includePhoneNumber || bypassLink;
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   
   // Demo Mode state
@@ -167,11 +166,27 @@ export default function Home() {
   const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
   const hostedLinkPopupRef = useRef<Window | null>(null);
 
+  // Update Mode (Link-only) state
+  const [updateModeAccessTokenInput, setUpdateModeAccessTokenInput] = useState<string>('');
+
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
   const effectiveWebhookConfigUrl = IS_DEV ? webhookUrl : (webhookUrlOverride.trim() || null);
   const effectiveWebhookConfigUrlForSettings = IS_DEV ? webhookUrl : (tempWebhookUrlOverride.trim() || null);
+  const hasCustomSettings =
+    zapMode ||
+    embeddedMode ||
+    layerMode ||
+    demoMode ||
+    multiItemLinkEnabled ||
+    hostedLinkEnabled ||
+    !autoRemoveEnabled ||
+    useLegacyUserToken ||
+    useAltCredentials ||
+    !includePhoneNumber ||
+    bypassLink ||
+    (!IS_DEV && webhookUrlOverride.trim().length > 0);
 
   const leafProductConfigs = useMemo(() => {
     const leafs: ProductConfig[] = [];
@@ -533,6 +548,15 @@ export default function Home() {
   const showLinkConfigPreview = (productId: string) => {
     const productConfig = getProductConfigById(productId);
     if (!productConfig) {
+      return;
+    }
+
+    // Link-only: Update Mode starts with an access_token input step
+    if (productId === 'link-update-mode') {
+      setUpdateModeAccessTokenInput('');
+      setModalState('update-mode-input');
+      setShowModal(true);
+      setShowWelcome(false);
       return;
     }
 
@@ -2042,9 +2066,24 @@ export default function Home() {
     // Hide the button
     setShowButton(false);
     
-    // Multi-item Link: do not show onSuccess screen for non-CRA products (tokens come from LINK webhooks)
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    const isUpdateMode = effectiveProductId === 'link-update-mode';
+
+    // Link-only: Update Mode should always show the standard callback modals (ignore Zap/Multi-item behavior)
+    if (isUpdateMode) {
+      setEventLogsPosition('left');
+      setShowModal(true);
+      setModalState('callback-success');
+      setCallbackData({
+        public_token,
+        metadata,
+      });
+      setShowWebhookPanel(false);
+      return;
+    }
+
+    // Multi-item Link: do not show onSuccess screen for non-CRA products (tokens come from LINK webhooks)
     const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
     if (isMultiItemNonCra) {
       setShowWebhookPanel(false);
@@ -2088,6 +2127,12 @@ export default function Home() {
     // Get the effective product ID to check product type
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = getProductConfigById(effectiveProductId!);
+
+    // Link-only: Update Mode does not run downstream APIs or cleanup; return to main menu.
+    if (effectiveProductId === 'link-update-mode') {
+      returnToProductMenuNoRemove();
+      return;
+    }
     
     // Check if this is a CRA product
     if (productConfig?.isCRA) {
@@ -2440,8 +2485,25 @@ export default function Home() {
     // Hide button
     setShowButton(false);
     
-    // Multi-item Link: for non-CRA products, do not show onExit screen; return to product selection
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const isUpdateMode = effectiveProductId === 'link-update-mode';
+
+    // Link-only: Update Mode should always show the standard callback modals (ignore Zap/Multi-item behavior)
+    if (isUpdateMode) {
+      if (!zapMode) {
+        setEventLogsPosition('left');
+      }
+      setShowModal(true);
+      setModalState('callback-exit');
+      setCallbackData({
+        err: err || null,
+        metadata,
+      });
+      setShowWebhookPanel(false);
+      return;
+    }
+
+    // Multi-item Link: for non-CRA products, do not show onExit screen; return to product selection
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
     if (isMultiItemNonCra) {
@@ -2723,8 +2785,8 @@ export default function Home() {
     const demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
-        ? { client_user_id: 'flash_user_id01' }
-        : { client_user_id: 'flash_user_id01', phone_number: '+14155550011' },
+        ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
+        : { client_user_id: 'flash_user_id01' },
       client_name: 'Plaid Flash',
       products,
       transactions: {
@@ -2910,6 +2972,76 @@ export default function Home() {
     setEditedUserCreateConfig('');
     setUserCreateConfigError(null);
     
+    // Reset webhook panel (but keep SSE connection open)
+    setShowWebhookPanel(false);
+    setWebhooks([]);
+
+    // Reset embedded Link state
+    setEmbeddedLinkActive(false);
+    setEmbeddedInstitutionSelected(false);
+    setEmbeddedLinkReady(false);
+    if (embeddedLinkHandlerRef.current?.destroy) {
+      embeddedLinkHandlerRef.current.destroy();
+      embeddedLinkHandlerRef.current = null;
+    }
+  };
+
+  const returnToProductMenuNoRemove = () => {
+    // Reset to product selection screen without reloading, skipping any user/item removal.
+    setShowModal(false);
+    setAccountsData(null);
+    setProductData(null);
+    setCallbackData(null);
+    setAccessToken(null);
+    setMultiItemAccessTokens([]);
+    setActiveMultiItemAccessTokenIndex(0);
+    setHybridModeActive(false);
+    setHybridNonCraProducts([]);
+    setHybridCraProducts([]);
+    setHybridQueue([]);
+    setHybridStepIndex(0);
+    setHybridStepData(null);
+    setHybridStepTitle('');
+    setHybridStepStatusCode(200);
+    setSelectedProduct(null);
+    setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
+    setLinkToken(null);
+    setLinkEvents([]);
+    setShowEventLogs(false);
+    setEventLogsPosition('right');
+    setIsTransitioningModals(false);
+    setModalState('loading');
+    setShowButton(false);
+    setShowWelcome(false);
+    setShowProductModal(true);
+    setErrorData(null);
+    setErrorMessage('');
+
+    // Reset Hosted Link waiting UI
+    setHostedLinkActive(false);
+    setHostedLinkUrl(null);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setHostedLinkExtractedPublicTokens([]);
+    try {
+      hostedLinkPopupRef.current?.close();
+    } catch {
+      // ignore
+    }
+    hostedLinkPopupRef.current = null;
+
+    // Reset CRA state
+    setUserCreateConfig(null);
+    setUserId(null);
+    setUserToken(null);
+    setIsEditingUserCreateConfig(false);
+    setEditedUserCreateConfig('');
+    setUserCreateConfigError(null);
+
+    // Reset Update Mode state
+    setUpdateModeAccessTokenInput('');
+
     // Reset webhook panel (but keep SSE connection open)
     setShowWebhookPanel(false);
     setWebhooks([]);
@@ -3656,6 +3788,78 @@ export default function Home() {
   };
 
   const renderModalContent = () => {
+    if (modalState === 'update-mode-input') {
+      const canProceed = updateModeAccessTokenInput.trim().length > 0;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Update Mode</h2>
+          </div>
+          <div className="account-data">
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+              Paste the <code>access_token</code> for the Item you want to update.
+            </p>
+            <textarea
+              value={updateModeAccessTokenInput}
+              onChange={(e) => setUpdateModeAccessTokenInput(e.target.value)}
+              rows={4}
+              style={{
+                width: '100%',
+                minHeight: 110,
+                background: 'rgba(0, 0, 0, 0.25)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 12,
+                color: 'rgba(255, 255, 255, 0.9)',
+                padding: 12,
+                fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                fontSize: 12,
+                resize: 'vertical',
+              }}
+              placeholder="access-sandbox-..."
+            />
+          </div>
+          <div className="modal-button-row two-buttons">
+            <ArrowButton
+              variant="red"
+              direction="back"
+              onClick={handleGoBackToProducts}
+            />
+            <ArrowButton
+              variant="blue"
+              disabled={!canProceed}
+              onClick={() => {
+                const access_token = updateModeAccessTokenInput.trim();
+                if (!access_token) return;
+
+                const cfg: any = {
+                  link_customization_name: 'flash',
+                  user: includePhoneNumber
+                    ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
+                    : { client_user_id: 'flash_user_id01' },
+                  client_name: 'Plaid Flash',
+                  country_codes: ['US'],
+                  language: 'en',
+                  access_token,
+                };
+
+                // Respect Hosted Link setting: use Hosted Link if enabled (completion via LINK/SESSION_FINISHED)
+                if (hostedLinkEnabled) {
+                  cfg.hosted_link = {};
+                  if (effectiveWebhookConfigUrl) {
+                    cfg.webhook = effectiveWebhookConfigUrl;
+                  }
+                }
+
+                setLinkTokenConfig(cfg);
+                setModalState('preview-config');
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     // CRA: User Create Preview Modal
     if (modalState === 'preview-user-create' && userCreateConfig) {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
@@ -3868,7 +4072,7 @@ export default function Home() {
         <div className="modal-callback">
           <div className="callback-header">
             <div className="callback-icon success-callback">✓</div>
-            <h2>onSuccess Callback Fired!</h2>
+            <h3>onSuccess Callback Fired!</h3>
           </div>
           <div className="account-data">
             <JsonHighlight 
@@ -3888,6 +4092,9 @@ export default function Home() {
     }
 
     if (modalState === 'callback-exit' && callbackData) {
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const isUpdateMode = effectiveProductId === 'link-update-mode';
+
       return (
         <div className="modal-callback">
           <div className="callback-header">
@@ -3905,7 +4112,7 @@ export default function Home() {
             />
           </div>
           <div className="modal-button-row single-button">
-            <ArrowButton variant="red" onClick={handleExitRetry} />
+            <ArrowButton variant="red" onClick={isUpdateMode ? returnToProductMenuNoRemove : handleExitRetry} />
           </div>
         </div>
       );
@@ -4032,7 +4239,8 @@ export default function Home() {
     if (modalState === 'hosted-waiting') {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
-      const allowForwardWithoutTokens = !!productConfig?.isCRA && !hybridModeActive;
+      const isUpdateMode = effectiveProductId === 'link-update-mode';
+      const allowForwardWithoutTokens = (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
 
       return (
         <div className="modal-success">
@@ -4062,7 +4270,7 @@ export default function Home() {
               enabled={true}
               linkToken={linkToken}
               webhooks={webhooks}
-              onForward={handleHostedLinkForward}
+              onForward={isUpdateMode ? () => returnToProductMenuNoRemove() : handleHostedLinkForward}
               title="Webhooks"
               allowForwardWithoutTokens={allowForwardWithoutTokens}
             />
@@ -4125,7 +4333,11 @@ export default function Home() {
                 </button>
                 <ArrowButton
                   variant="blue"
-                  onClick={() => handleHostedLinkForward(hostedLinkExtractedPublicTokens)}
+                  onClick={() =>
+                    isUpdateMode
+                      ? returnToProductMenuNoRemove()
+                      : handleHostedLinkForward(hostedLinkExtractedPublicTokens)
+                  }
                   disabled={!allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0}
                 />
               </div>

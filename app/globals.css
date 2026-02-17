@@ -2356,12 +2356,9 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 
 /* Inline webhook viewer under onEvent logs */
 .multiitem-webhook-panel {
-  background: rgba(26, 26, 46, 0.95);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   padding: 24px 32px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.1);
   height: 380px;
   max-height: 380px;
   display: flex;

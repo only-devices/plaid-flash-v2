@@ -4,10 +4,11 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { products, required_if_supported_products, user_id, user_token, user, webhook, useAltCredentials, ...otherParams } = body;
+    const isUpdateMode = typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0;
 
     // Default to auth if no products specified
-    const productsArray = products || ['auth'];
-    const requiredProducts = required_if_supported_products || [];
+    const productsArray = products ?? (isUpdateMode ? undefined : ['auth']);
+    const requiredProducts = required_if_supported_products ?? [];
 
     // Select credentials based on flag
     const clientId = useAltCredentials && process.env.ALT_PLAID_CLIENT_ID 
@@ -26,10 +27,10 @@ export async function POST(request: NextRequest) {
         phone_number: '+14155550011'
       },
       client_name: 'Plaid Flash',
-      products: productsArray,
       country_codes: ['US'],
       language: 'en',
-      ...(requiredProducts.length > 0 && { required_if_supported_products: requiredProducts })
+      ...(Array.isArray(productsArray) && productsArray.length > 0 ? { products: productsArray } : {}),
+      ...(Array.isArray(requiredProducts) && requiredProducts.length > 0 ? { required_if_supported_products: requiredProducts } : {})
     };
 
     // Add user_id or user_token for CRA products
