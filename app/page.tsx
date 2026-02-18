@@ -4748,6 +4748,20 @@ export default function Home() {
       </Modal>
       <Modal isVisible={showSettingsModal}>
         <div className="settings-modal">
+          <a
+            className="settings-gear-button settings-docs-button"
+            href="https://github.com/only-devices/plaid-flash-v2/tree/main?tab=readme-ov-file#plaid-flash"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open README documentation"
+            title="Docs"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 2-3 4" />
+              <path d="M12 17h.01" />
+            </svg>
+          </a>
           <div className="settings-header">
             <h2>Advanced Settings</h2>
           </div>

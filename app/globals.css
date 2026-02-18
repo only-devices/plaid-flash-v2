@@ -1766,6 +1766,18 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   display: block;
 }
 
+/* Docs button in Advanced Settings modal */
+.settings-docs-button {
+  top: 36px; /* place below the top-right close icon */
+  right: 36px;
+  background: linear-gradient(135deg, #3d9991 0%, #2d6b66 100%);
+}
+
+.settings-docs-button:focus-visible {
+  outline: 2px solid rgba(136, 192, 208, 0.9);
+  outline-offset: 3px;
+}
+
 /* Settings Indicator - small badge on gear icon */
 .settings-indicator {
   position: absolute;
