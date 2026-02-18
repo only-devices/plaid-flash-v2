@@ -1,6 +1,6 @@
 # Plaid Flash
 
-Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows and product APIs (primarily in **Sandbox**) with a fast, UI-driven workflow and copy/paste-friendly request/response modals.
+Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows and product APIs in the Plaid Sandbox with a fast, UI-driven workflow and copy/paste-friendly request/response modals.
 
 **Live app**: `https://plaid-flash.vercel.app`
 
