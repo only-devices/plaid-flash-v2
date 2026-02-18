@@ -1,195 +1,171 @@
 # Plaid Flash
 
-A lightweight Next.js application for testing Plaid integrations in Plaid's Sandbox environment. Built with Next.js 16 App Router, TypeScript, and designed to run in Docker for consistent development environments.
+Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows and product APIs (primarily in **Sandbox**) with a fast, UI-driven workflow and copy/paste-friendly request/response modals.
 
-## 🐳 Quick Start
+**Live app**: `https://plaid-flash.vercel.app`
 
-Run the app using Docker - no Node.js installation required!
+## Contents
 
-### Step 1: Get Plaid Credentials & Configure Link Customization
+- [Advanced Mode (Docker)](#advanced-mode-docker)
+- [Environment variables](#environment-variables)
+- [How to use the app](#how-to-use-the-app)
+- [Supported products](#supported-products)
+- [Settings toggles (feature flags)](#settings-toggles-feature-flags)
+- [Webhooks (dev-only in-app viewer)](#webhooks-dev-only-in-app-viewer)
+- [Troubleshooting](#troubleshooting)
 
-1. Sign up at [dashboard.plaid.com/signup](https://dashboard.plaid.com/signup)
-2. Navigate to **Team Settings → Keys**
-3. Copy your **Client ID** and **Sandbox secret**
-4. Ensure you have a Link customization named `flash`
+## Advanced Mode (Docker)
 
-### Step 2: Get ngrok authtoken
+### Prerequisites
 
-1. [Sign up](https://dashboard.ngrok.com/signup) for a free ngrok user account
-2. Copy your [authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+- A Plaid account + API keys: `PLAID_CLIENT_ID` and `PLAID_SECRET` (only Plaid Sandbox is supported).
+- A Link customization named **`flash`** in the Plaid Dashboard.
 
-### Step 2: Clone this repo
-`git clone https://github.com/only-devices/plaid-flash-docker.git`
-
-### Step 3: Install Docker
-
-- Download and install [Docker](https://docs.docker.com/get-docker/)
-  - 🍎 Install on Mac using [Homebrew](https://brew.sh): `brew install --cask docker-desktop`
-
-### Step 3: Configure Environment
-
-Create a `.env` file from the template:
+This repo supports running in Docker for a consistent environment (and to enable dev-only webhook features if you provide `NGROK_AUTHTOKEN`).
 
 ```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your credentials:
-
-```bash
-# Plaid API Configuration
-PLAID_CLIENT_ID=your_client_id_here
-PLAID_SECRET=your_sandbox_secret_here
-PLAID_ENV=sandbox
-
-# ngrok Webhook Tunnel (required for CRA and Transactions)
-# Get your free token at: https://dashboard.ngrok.com/get-started/your-authtoken
-ngrok_AUTHTOKEN=your_ngrok_authtoken
-```
-
-### Step 3: Run with Docker Compose
-
-```bash
-# Build and start the container
+cp .env.example .env  # <- Update .env with your credentials
 docker compose up --build
-
-# Or run in detached mode (background)
-docker compose up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open `http://localhost:3000`.
 
-### Docker Commands
+## Environment variables
+
+Create a `.env` file based on `.env.example` and populate with your credentials.
+
+### Useful Docker commands
 
 ```bash
-# Stop the container
-docker compose down
-
-# Rebuild after code changes
-docker compose up --build
-
-# View logs
-docker compose logs -f
-
-# Stop and remove everything
-docker compose down -v
+docker compose logs -f # Follow log messages from the app
+docker compose down    # Stops the Docker container
+docker compose down -v # Stops and removes Docker container
 ```
 
-## ⚙️ Configuration Options
+### Required
 
-### Alternative Credentials
+- **`PLAID_CLIENT_ID`**: your Plaid Client ID
+- **`PLAID_SECRET`**: your Plaid Sandbox Secret
 
-Test with multiple Plaid accounts by adding ALT credentials to `.env`:
+### Optional
 
-```bash
-ALT_PLAID_CLIENT_ID=your_second_client_id
-ALT_PLAID_SECRET=your_second_secret
-```
+- **`ALT_PLAID_CLIENT_ID`**, **`ALT_PLAID_SECRET`**: enable the **Use ALT_PLAID_CLIENT_ID** toggle to switch credentials per session.
+- **`NGROK_AUTHTOKEN`** (local dev-only): enables the in-app webhook viewer/stream while running locally.
 
-Toggle between accounts in **Settings** without restarting.
+## How to use the app
 
-### CRA Legacy Mode
+### Typical non-CRA flow
 
-For Consumer Report (CRA) products, toggle between:
-- **user_id mode** (default): Uses `user_id` with `identity` object
-- **user_token mode**: Uses `user_token` with `consumer_report_user_identity` object
+1. Pick a product (e.g. Auth).
+2. Review/edit the `/link/token/create` configuration.
+3. Complete Link.
+4. Exchange `public_token` → `access_token`.
+5. Call `/accounts/get` (where applicable) and then the selected product endpoint.
 
-Access in **Settings** before creating a user.
+### CRA flow (Plaid Check / Consumer Report)
 
-## 📁 Project Structure
+CRA products use a **user-based** flow:
 
-```
-plaid-flash/
-├── app/
-│   ├── layout.tsx              # Root layout
-│   ├── page.tsx                # Main page (client component)
-│   ├── globals.css             # Global styles
-│   └── api/                    # API routes
-│       ├── create-link-token/  # Link token creation
-│       ├── user-create/        # CRA user creation
-│       ├── exchange-public-token/ # Token exchange
-│       ├── cra-*/              # CRA product endpoints
-│       ├── webhook/            # Webhook receiver
-│       └── ...                 # Product endpoints
-├── components/
-│   ├── LinkButton.tsx          # Launch button
-│   ├── Modal.tsx               # Modal component
-│   ├── ProductSelector.tsx     # Product catalog
-│   ├── SettingsToggle.tsx      # Settings controls
-│   └── WebhookPanel.tsx        # Webhook display
-├── lib/
-│   ├── ngrokManager.ts         # ngrok tunnel management
-│   ├── productConfig.ts        # Product definitions
-│   └── webhookStore.ts         # Webhook state management
-├── .env.example                # Environment template
-├── docker-compose.yml          # Docker configuration
-├── Dockerfile                  # Docker build instructions
-└── package.json                # Dependencies
-```
+1. `/user/create` preview + create
+2. `/link/token/create` includes `user_id` or `user_token` (based on the **Use legacy user_token** toggle)
+3. Complete Link
+4. Run CRA product APIs (and watch CRA webhooks in the viewer in dev)
 
-## 🛠 Technologies
+### Hosted Link flow
 
-### Frontend
-- **Next.js 16** - React framework with App Router
-- **TypeScript** - Type safety
-- **react-plaid-link** - Official Plaid Link React hook
-- **CSS3** - Animations and modern styling
+When **Hosted Link** is enabled:
 
-### Backend
-- **Next.js API Routes** - Serverless endpoints
-- **plaid-fetch** - Edge-compatible Plaid client
-- **@ngrok/ngrok** - Webhook tunnel SDK
+- `/link/token/create` includes `hosted_link: {}` and returns `hosted_link_url`
+- The app opens Hosted Link in a new tab and waits for `LINK/SESSION_FINISHED`
+- After completion, it continues with the standard exchange → accounts → product flow
 
-## 🧪 Sandbox Test Credentials
+### Update Mode
 
-Plaid provides test users for different scenarios:
+Under **Link → Update Mode**, you can paste:
 
-- [Full list of test credentials](https://plaid.com/docs/sandbox/test-credentials/)
-```
+- An `access_token` to trigger Item-based update mode
+- A `user_id` or `user_token` to trigger User-based update mode
 
-## 🐛 Troubleshooting
+Update Mode does **not** run downstream product APIs and does **not** automatically remove the Item/User at the end.
 
-### Container won't start
-```bash
-# Check logs
-docker compose logs
+## Supported products
 
-# Verify environment variables
-docker compose config
+Product definitions live in `lib/productConfig.ts`. Leaf products below include the Plaid API they call (as shown in the UI).
 
-# Ensure .env file exists
-ls -la .env
-```
+### Payments and Funding
 
-### Port already in use
-```bash
-# Change port in docker-compose.yml
-ports:
-  - "3001:3000"  # Use 3001 instead
-```
+- **Auth** → `/auth/get`
+- **Signal**
+  - Signal Evaluate → `/signal/evaluate`
+  - Signal Balance → `/accounts/balance/get`
+- **Identity**
+  - Identity Get → `/identity/get`
+  - Identity Match → `/identity/match`
+- **Investments Move** → `/investments/auth/get`
 
-### ngrok tunnel not starting
-- Check `ngrok_AUTHTOKEN` is set in `.env`
-- Verify token is valid at [dashboard.ngrok.com](https://dashboard.ngrok.com)
-- Check Docker logs: `docker compose logs -f`
+### Personal Finance Insights
 
-### Alt credentials not working
-- Verify both `ALT_PLAID_CLIENT_ID` and `ALT_PLAID_SECRET` are set
-- Create a fresh user after enabling the toggle
-- Check logs for credential selection
+- **Transactions**
+  - Transactions Get → `/transactions/get`
+  - Transactions Sync → `/transactions/sync`
+- **Investments**
+  - Investments Holdings → `/investments/holdings/get`
+  - Investments Transactions → `/investments/transactions/get`
+- **Liabilities** → `/liabilities/get`
 
-### Webhook events not appearing
-- Ensure ngrok tunnel is running (check logs)
-- Verify webhook URL is set in Link Token config
-- Check webhook panel is visible in UI
+### CRA
 
-## 📜 License
+- Base Report → `/cra/check_report/base_report/get`
+- Income Insights → `/cra/check_report/income_insights/get`
+- Partner Insights → `/cra/check_report/partner_insights/get`
+- Cashflow Insights → `/cra/check_report/cashflow_insights/get`
+- Cashflow Updates → `/cra/monitoring_insights/get`
 
-MIT
+### Link
 
-## 🔗 Resources
+- **Update Mode** (Link only; no downstream calls)
 
-- [Plaid Documentation](https://plaid.com/docs/)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [plaid-fetch GitHub](https://github.com/heysanil/plaid-fetch)
-- [ngrok Documentation](https://ngrok.com/docs)
+## Settings toggles (feature flags)
+
+The **Advanced Settings** modal includes these toggles:
+
+- **⚡️ Mode**: streamlined mode that skips some intermediate screens and runs faster through flows.
+- **Demo Mode**: connect once, then try multiple products without re-running Link every time.
+- **Embedded Link Mode**: runs Link using the embedded Link experience.
+- **Include phone_number in Link Token Create config**: adds `user.phone_number` (E.164) to Link token configs.
+- **Layer**: placeholder (currently disabled in UI).
+- **Use legacy user_token**: Switches between modern `user_id`/`identity` and legacy `user_token`/`consumer_report_user_identity` for `/user/create` calls
+- **Use ALT_PLAID_CLIENT_ID**: uses `ALT_PLAID_CLIENT_ID` + `ALT_PLAID_SECRET` for the session.
+- **Bypass Link (Sandbox Only)**: uses Sandbox endpoints to create items without Link UI and go straight to downstream calls.
+- **Multi-item Link**: enables `enable_multi_item_link: true`. Non-CRA flows use Plaid webhooks to capture `public_tokens[]` and includes an Item picker when multiple Items are added.
+- **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received.
+- **Remove items and users automatically** (default on): when you finish and return to the menu, automatically calls `/item/remove` (non-CRA) or `/user/remove` (CRA/hybrid). When off, deletion is skipped.
+
+## Webhooks (dev-only in-app viewer)
+
+When running locally in dev with `NGROK_AUTHTOKEN`, Plaid Flash starts an ngrok tunnel and exposes an in-app webhook viewer/stream. This is used for:
+
+- CRA report webhooks
+- Multi-item Link (Webhooks such as `ITEM_ADD_RESULT` and `SESSION_FINISHED`)
+- Hosted Link completion (`SESSION_FINISHED` webhook)
+
+## Troubleshooting
+
+### No webhook events appear
+
+- Confirm you’re running locally in dev.
+- Confirm `NGROK_AUTHTOKEN` is set in `.env` (exact casing).
+- Confirm the Link token config includes a `webhook` URL (the UI preview should show it).
+
+### Hosted Link doesn’t open
+
+- Some browsers block popups; try the UI’s “Open Hosted Link” button if present.
+
+### ALT credentials toggle is disabled
+
+- Ensure both `ALT_PLAID_CLIENT_ID` and `ALT_PLAID_SECRET` are set.
+
+## Resources
+
+- Plaid docs: `https://plaid.com/docs/`
+- Sandbox test credentials: `https://plaid.com/docs/sandbox/test-credentials/`
