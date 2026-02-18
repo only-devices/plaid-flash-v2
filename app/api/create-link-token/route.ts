@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { generateClientUserId } from '@/lib/generateClientUserId';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { products, required_if_supported_products, user_id, user_token, user, webhook, useAltCredentials, ...otherParams } = body;
-    const isUpdateMode = typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0;
+    const isUpdateMode =
+      (typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0) ||
+      (typeof user_token === 'string' && user_token.trim().length > 0) ||
+      (typeof user_id === 'string' && user_id.trim().length > 0);
 
     // Default to auth if no products specified
     const productsArray = products ?? (isUpdateMode ? undefined : ['auth']);
@@ -18,20 +22,36 @@ export async function POST(request: NextRequest) {
       ? process.env.ALT_PLAID_SECRET 
       : process.env.PLAID_SECRET;
 
+    // In Update Mode, we still include a `user` object, but we omit `client_user_id`.
+    // In non-Update flows, we include the default `user` block only when user_id/user_token aren't provided.
+    const shouldIncludeUser = isUpdateMode || !!user || (!user_id && !user_token);
+
     const linkTokenConfig: any = {
       client_id: clientId,
       secret: secret,
       link_customization_name: 'flash',
-      user: user || {
-        client_user_id: 'flash_user_id01',
-        phone_number: '+14155550011'
-      },
       client_name: 'Plaid Flash',
       country_codes: ['US'],
       language: 'en',
       ...(Array.isArray(productsArray) && productsArray.length > 0 ? { products: productsArray } : {}),
       ...(Array.isArray(requiredProducts) && requiredProducts.length > 0 ? { required_if_supported_products: requiredProducts } : {})
     };
+
+    if (shouldIncludeUser) {
+      const baseUser: any =
+        user ||
+        (!isUpdateMode
+          ? { client_user_id: generateClientUserId(), phone_number: '+14155550011' }
+          : { phone_number: '+14155550011' });
+
+      if (isUpdateMode) {
+        // Omit client_user_id specifically for all Update Mode scenarios
+        const { client_user_id: _omit, ...rest } = baseUser || {};
+        linkTokenConfig.user = rest;
+      } else {
+        linkTokenConfig.user = baseUser;
+      }
+    }
 
     // Add user_id or user_token for CRA products
     if (user_id) {

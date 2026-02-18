@@ -15,6 +15,7 @@ import MultiItemWebhookPanel from '@/components/MultiItemWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
 import { isWebhooksEnabledClient } from '@/lib/featureFlags';
+import { generateClientUserId } from '@/lib/generateClientUserId';
 
 // Feature flag for webhooks (development-only)
 const WEBHOOKS_ENABLED = isWebhooksEnabledClient();
@@ -612,8 +613,8 @@ export default function Home() {
     const fullConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber 
-        ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
-        : { client_user_id: 'flash_user_id01' },
+        ? { client_user_id: generateClientUserId(), phone_number: '+14155550011' }
+        : { client_user_id: generateClientUserId() },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
@@ -875,8 +876,11 @@ export default function Home() {
     const fullConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
-        ? { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01', phone_number: '+14155550011' }
-        : { client_user_id: userCreateConfig?.client_user_id || 'flash_cra_user_01' },
+        ? {
+            client_user_id: userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_'),
+            phone_number: '+14155550011',
+          }
+        : { client_user_id: userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_') },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
@@ -2785,8 +2789,8 @@ export default function Home() {
     const demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
-        ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
-        : { client_user_id: 'flash_user_id01' },
+        ? { client_user_id: generateClientUserId(), phone_number: '+14155550011' }
+        : { client_user_id: generateClientUserId() },
       client_name: 'Plaid Flash',
       products,
       transactions: {
@@ -3789,7 +3793,23 @@ export default function Home() {
 
   const renderModalContent = () => {
     if (modalState === 'update-mode-input') {
-      const canProceed = updateModeAccessTokenInput.trim().length > 0;
+      const raw = updateModeAccessTokenInput.trim();
+      const tokenType: 'access_token' | 'user_token' | 'user_id' | null = raw.startsWith('access-')
+        ? 'access_token'
+        : raw.startsWith('user-')
+          ? 'user_token'
+          : raw.startsWith('usr_')
+            ? 'user_id'
+            : null;
+      const canProceed = !!tokenType;
+      const helperText =
+        tokenType === 'access_token'
+          ? 'Detected access_token (Item-based update mode)'
+          : tokenType === 'user_token'
+            ? 'Detected user_token (User-based update mode)'
+            : tokenType === 'user_id'
+              ? 'Detected user_id (User-based update mode)'
+              : 'Enter an access_token (access-…), user_token (user-…), or user_id (usr_…).';
 
       return (
         <div className="modal-success">
@@ -3798,7 +3818,7 @@ export default function Home() {
           </div>
           <div className="account-data">
             <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
-              Paste the <code>access_token</code> for the Item you want to update.
+              Paste an <code>access_token</code>, <code>user_token</code>, or <code>user_id</code> to start Update Mode.
             </p>
             <textarea
               value={updateModeAccessTokenInput}
@@ -3816,8 +3836,16 @@ export default function Home() {
                 fontSize: 12,
                 resize: 'vertical',
               }}
-              placeholder="access-sandbox-..."
+              placeholder={'access-sandbox-...\nuser-sandbox-...\nusr_...'}
             />
+            <p style={{ marginTop: 10, marginBottom: 0, opacity: 0.75, fontSize: 12 }}>
+              {helperText}
+            </p>
+            {!canProceed && raw.length > 0 && (
+              <div className="config-error" style={{ marginTop: 10 }}>
+                Unrecognized token format. Expected prefixes: <code>access-</code>, <code>user-</code>, or <code>usr_</code>.
+              </div>
+            )}
           </div>
           <div className="modal-button-row two-buttons">
             <ArrowButton
@@ -3829,19 +3857,35 @@ export default function Home() {
               variant="blue"
               disabled={!canProceed}
               onClick={() => {
-                const access_token = updateModeAccessTokenInput.trim();
-                if (!access_token) return;
+                const value = updateModeAccessTokenInput.trim();
+                if (!value) return;
+                const detectedType: 'access_token' | 'user_token' | 'user_id' | null = value.startsWith('access-')
+                  ? 'access_token'
+                  : value.startsWith('user-')
+                    ? 'user_token'
+                    : value.startsWith('usr_')
+                      ? 'user_id'
+                      : null;
+                if (!detectedType) return;
 
                 const cfg: any = {
                   link_customization_name: 'flash',
-                  user: includePhoneNumber
-                    ? { client_user_id: 'flash_user_id01', phone_number: '+14155550011' }
-                    : { client_user_id: 'flash_user_id01' },
+                  // Update Mode: omit client_user_id; keep phone_number only if enabled.
+                  user: includePhoneNumber ? { phone_number: '+14155550011' } : {},
                   client_name: 'Plaid Flash',
                   country_codes: ['US'],
                   language: 'en',
-                  access_token,
                 };
+
+                if (detectedType === 'access_token') {
+                  cfg.access_token = value;
+                } else if (detectedType === 'user_token') {
+                  cfg.user_token = value;
+                  cfg.update = { user: true };
+                } else if (detectedType === 'user_id') {
+                  cfg.user_id = value;
+                  cfg.update = { user: true };
+                }
 
                 // Respect Hosted Link setting: use Hosted Link if enabled (completion via LINK/SESSION_FINISHED)
                 if (hostedLinkEnabled) {
