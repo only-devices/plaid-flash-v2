@@ -1080,6 +1080,28 @@ body {
   transform: translateY(-4px);
 }
 
+.product-card:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.product-card:disabled::after {
+  opacity: 0;
+}
+
+.product-card:disabled:hover {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.product-card:disabled .product-card-arrow {
+  opacity: 0;
+}
+
 .product-card-arrow {
   position: absolute;
   top: 24px;
@@ -2007,11 +2029,15 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 }
 
 /* Tooltip for disabled toggles */
-.settings-toggle-row[data-tooltip]::after {
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   left: 50%;
-  bottom: 50%;
+  bottom: 20%;
   transform: translateX(-50%);
   background: rgba(45, 155, 159, 0.95);
   color: #ffffff;
@@ -2028,24 +2054,15 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   z-index: 1000;
 }
 
-.settings-toggle-row[data-tooltip]::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%);
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 6px solid rgba(26, 26, 46, 0.95);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-  z-index: 1000;
+[data-tooltip]:hover::after {
+  opacity: 1;
 }
 
-.settings-toggle-row[data-tooltip]:hover::after,
-.settings-toggle-row[data-tooltip]:hover::before {
-  opacity: 1;
+.product-card-tooltip-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  overflow: visible;
 }
 
 /* Toggle Switch Container */

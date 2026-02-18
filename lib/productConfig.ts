@@ -369,14 +369,14 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         id: 'cra-cashflow-updates',
         name: 'Cashflow Updates',
         shortName: 'Cashflow Updates',
-        products: ['cra_base_report', 'cra_monitoring'],
+        products: ['cra_base_report'],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
         icon: '/icons/cra.png',
         apiEndpoint: '/api/cra-cashflow-updates-get',
         apiTitle: '/cra/monitoring_insights/get',
         isCRA: true,
-        highlightKeys: ['items', 'insights'],
+        highlightKeys: [],
         additionalApiParams: {
           consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
         },

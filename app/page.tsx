@@ -12,6 +12,7 @@ import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
 import WebhookPanel from '@/components/WebhookPanel';
 import MultiItemWebhookPanel from '@/components/MultiItemWebhookPanel';
+import CashflowUpdatesWebhookPanel, { type CashflowUpdatesWebhookEvent } from '@/components/CashflowUpdatesWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
 import { isWebhooksEnabledClient } from '@/lib/featureFlags';
@@ -56,7 +57,34 @@ export default function Home() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
-  const [modalState, setModalState] = useState<'loading' | 'preview-user-create' | 'preview-config' | 'preview-sandbox-config' | 'preview-product-api' | 'callback-success' | 'callback-exit' | 'callback-exit-zap' | 'accounts-data' | 'processing-accounts' | 'processing-product' | 'processing-user-create' | 'creating-sandbox-item' | 'hosted-waiting' | 'update-mode-input' | 'hybrid-step' | 'success' | 'error' | 'api-error' | 'zap-mode-results' | 'tidying-up'>('loading');
+  const [modalState, setModalState] = useState<
+    | 'loading'
+    | 'preview-user-create'
+    | 'preview-config'
+    | 'preview-sandbox-config'
+    | 'preview-product-api'
+    | 'callback-success'
+    | 'callback-exit'
+    | 'callback-exit-zap'
+    | 'accounts-data'
+    | 'processing-accounts'
+    | 'processing-product'
+    | 'processing-user-create'
+    | 'creating-sandbox-item'
+    | 'hosted-waiting'
+    | 'update-mode-input'
+    | 'hybrid-step'
+    | 'cashflow-updates-loading-items'
+    | 'cashflow-updates-pick-item'
+    | 'cashflow-updates-subscribing'
+    | 'cashflow-updates-webhooks'
+    | 'cashflow-updates-fetching-report'
+    | 'success'
+    | 'error'
+    | 'api-error'
+    | 'zap-mode-results'
+    | 'tidying-up'
+  >('loading');
   const [accountsData, setAccountsData] = useState<any>(null);
   const [productData, setProductData] = useState<any>(null);
   const [callbackData, setCallbackData] = useState<any>(null);
@@ -170,6 +198,16 @@ export default function Home() {
   // Update Mode (Link-only) state
   const [updateModeAccessTokenInput, setUpdateModeAccessTokenInput] = useState<string>('');
 
+  // CRA Monitoring Insights (Cashflow Updates) state
+  type CashflowUpdatesItem = { institution_name: string; item_id: string };
+  const [cashflowUpdatesItems, setCashflowUpdatesItems] = useState<CashflowUpdatesItem[]>([]);
+  const [cashflowUpdatesSelectedIndex, setCashflowUpdatesSelectedIndex] = useState<number>(0);
+  const [cashflowUpdatesSubscribedItemId, setCashflowUpdatesSubscribedItemId] = useState<string | null>(null);
+  const [cashflowUpdatesSubscriptionResponse, setCashflowUpdatesSubscriptionResponse] = useState<any>(null);
+  const [cashflowUpdatesManualPayload, setCashflowUpdatesManualPayload] = useState<string>('');
+  const [cashflowUpdatesManualParseError, setCashflowUpdatesManualParseError] = useState<string | null>(null);
+  const [cashflowUpdatesManualWebhooks, setCashflowUpdatesManualWebhooks] = useState<CashflowUpdatesWebhookEvent[]>([]);
+
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
@@ -202,6 +240,21 @@ export default function Home() {
     PRODUCTS_ARRAY.forEach(visit);
     return leafs;
   }, []);
+
+  const getProductDisableInfo = useCallback(
+    (productId: string) => {
+      const cfg = getProductConfigById(productId);
+      const isLeaf = !!cfg?.apiEndpoint;
+      if (isLeaf && cfg?.requiresWebhook && !effectiveWebhookConfigUrl) {
+        return {
+          disabled: true,
+          reason: 'Configure a webhook URL in settings first.',
+        };
+      }
+      return { disabled: false as const };
+    },
+    [effectiveWebhookConfigUrl]
+  );
 
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
@@ -1934,6 +1987,81 @@ export default function Home() {
         // CRA products: skip access_token exchange, show product API preview directly
         // Keep showing 'creating-sandbox-item' modal during this process
         try {
+          // CRA Cashflow Updates (Monitoring Insights): even in Bypass Link mode, we must run the
+          // items -> subscribe -> webhook -> get sequence (not jump straight to /get).
+          if (effectiveProductId === 'cra-cashflow-updates') {
+            const credsFlag = usedAltCredentials || useAltCredentials;
+
+            const baseParams: any = { useAltCredentials: credsFlag };
+            if (usedUserToken && userToken) {
+              baseParams.user_token = userToken;
+            } else if (userId) {
+              baseParams.user_id = userId;
+            } else if (userToken) {
+              baseParams.user_token = userToken;
+            } else {
+              throw new Error('Missing user_id/user_token for CRA flow');
+            }
+
+            // Reset per-run state so we only gate on fresh webhooks
+            setCashflowUpdatesItems([]);
+            setCashflowUpdatesSelectedIndex(0);
+            setCashflowUpdatesSubscribedItemId(null);
+            setCashflowUpdatesSubscriptionResponse(null);
+            setCashflowUpdatesManualPayload('');
+            setCashflowUpdatesManualParseError(null);
+            setCashflowUpdatesManualWebhooks([]);
+            setWebhooks([]);
+
+            setModalState('cashflow-updates-loading-items');
+            setShowModal(true);
+
+            const itemsResp = await fetch('/api/user-items-get', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(baseParams),
+            });
+            const itemsJson = await itemsResp.json();
+
+            if (itemsResp.status >= 400) {
+              setErrorData(itemsJson);
+              setApiStatusCode(itemsResp.status);
+              setModalState('api-error');
+              setShowModal(true);
+              return;
+            }
+
+            const rawItems: any[] = Array.isArray(itemsJson?.items) ? itemsJson.items : [];
+            const normalized = rawItems
+              .map((it: any) => {
+                const item_id = String(it?.item_id || '').trim();
+                const institution_name =
+                  String(it?.institution_name || it?.institution_id || it?.item_id || '').trim() || 'Unknown institution';
+                if (!item_id) return null;
+                return { institution_name, item_id };
+              })
+              .filter(Boolean) as { institution_name: string; item_id: string }[];
+
+            if (normalized.length === 0) {
+              setErrorData({
+                error: 'NO_ITEMS_FOUND',
+                message:
+                  'No Items were returned from /user/items/get. Ensure the sandbox item was created and the user has Items.',
+                response: itemsJson,
+              });
+              setApiStatusCode(200);
+              setModalState('api-error');
+              setShowModal(true);
+              return;
+            }
+
+            setCashflowUpdatesItems(normalized);
+            setCashflowUpdatesSelectedIndex(0);
+            setModalState('cashflow-updates-pick-item');
+            setShowModal(true);
+            return;
+          }
+
           if (!productConfig.apiEndpoint) {
             throw new Error('Product API endpoint not configured');
           }
@@ -2180,6 +2308,79 @@ export default function Home() {
 
           // Execute first step (accounts/get)
           await executeHybridStep(0, access_token, steps);
+          return;
+        }
+
+        // CRA Cashflow Updates: run the dedicated Monitoring Insights sequence
+        if (effectiveProductId === 'cra-cashflow-updates') {
+          const credsFlag = usedAltCredentials || useAltCredentials;
+
+          const baseParams: any = { useAltCredentials: credsFlag };
+          if (usedUserToken && userToken) {
+            baseParams.user_token = userToken;
+          } else if (userId) {
+            baseParams.user_id = userId;
+          } else if (userToken) {
+            baseParams.user_token = userToken;
+          } else {
+            throw new Error('Missing user_id/user_token for CRA flow');
+          }
+
+          // Reset per-run state so we only gate on fresh webhooks
+          setCashflowUpdatesItems([]);
+          setCashflowUpdatesSelectedIndex(0);
+          setCashflowUpdatesSubscribedItemId(null);
+          setCashflowUpdatesSubscriptionResponse(null);
+          setCashflowUpdatesManualPayload('');
+          setCashflowUpdatesManualParseError(null);
+          setCashflowUpdatesManualWebhooks([]);
+          setWebhooks([]);
+
+          setModalState('cashflow-updates-loading-items');
+          setShowModal(true);
+
+          const itemsResp = await fetch('/api/user-items-get', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(baseParams),
+          });
+          const itemsJson = await itemsResp.json();
+
+          if (itemsResp.status >= 400) {
+            setErrorData(itemsJson);
+            setApiStatusCode(itemsResp.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          const rawItems: any[] = Array.isArray(itemsJson?.items) ? itemsJson.items : [];
+          const normalized = rawItems
+            .map((it: any) => {
+              const item_id = String(it?.item_id || '').trim();
+              const institution_name =
+                String(it?.institution_name || it?.institution_id || it?.item_id || '').trim() || 'Unknown institution';
+              if (!item_id) return null;
+              return { institution_name, item_id };
+            })
+            .filter(Boolean) as { institution_name: string; item_id: string }[];
+
+          if (normalized.length === 0) {
+            setErrorData({
+              error: 'NO_ITEMS_FOUND',
+              message: 'No Items were returned from /user/items/get. Ensure Link completed and the user has Items.',
+              response: itemsJson,
+            });
+            setApiStatusCode(200);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          setCashflowUpdatesItems(normalized);
+          setCashflowUpdatesSelectedIndex(0);
+          setModalState('cashflow-updates-pick-item');
+          setShowModal(true);
           return;
         }
 
@@ -2828,6 +3029,15 @@ export default function Home() {
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setHostedLinkExtractedPublicTokens([]);
+
+    // Reset Cashflow Updates state
+    setCashflowUpdatesItems([]);
+    setCashflowUpdatesSelectedIndex(0);
+    setCashflowUpdatesSubscribedItemId(null);
+    setCashflowUpdatesSubscriptionResponse(null);
+    setCashflowUpdatesManualPayload('');
+    setCashflowUpdatesManualParseError(null);
+    setCashflowUpdatesManualWebhooks([]);
     
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
@@ -3034,6 +3244,15 @@ export default function Home() {
       // ignore
     }
     hostedLinkPopupRef.current = null;
+
+    // Reset Cashflow Updates state
+    setCashflowUpdatesItems([]);
+    setCashflowUpdatesSelectedIndex(0);
+    setCashflowUpdatesSubscribedItemId(null);
+    setCashflowUpdatesSubscriptionResponse(null);
+    setCashflowUpdatesManualPayload('');
+    setCashflowUpdatesManualParseError(null);
+    setCashflowUpdatesManualWebhooks([]);
 
     // Reset CRA state
     setUserCreateConfig(null);
@@ -3791,6 +4010,210 @@ export default function Home() {
     return info.institution_name || info.institution_id || info.item_id || `Item ${index + 1}`;
   };
 
+  const CASHFLOW_UPDATES_QUALIFYING_CODES = useMemo(
+    () => new Set(['CASH_FLOW_INSIGHTS_UPDATED', 'INSIGHTS_UPDATED']),
+    []
+  );
+
+  const cashflowUpdatesSelectedItem = cashflowUpdatesItems[cashflowUpdatesSelectedIndex] || null;
+
+  const cashflowUpdatesCombinedEvents = useMemo(() => {
+    const devEvents = Array.isArray(webhooks) ? (webhooks as CashflowUpdatesWebhookEvent[]) : [];
+    return [...cashflowUpdatesManualWebhooks, ...devEvents];
+  }, [cashflowUpdatesManualWebhooks, webhooks]);
+
+  const cashflowUpdatesQualifyingEvents = useMemo(() => {
+    return cashflowUpdatesCombinedEvents
+      .filter((e) => e.webhook_type === 'CASH_FLOW_UPDATES')
+      .filter((e) => CASHFLOW_UPDATES_QUALIFYING_CODES.has(e.webhook_code))
+      .filter((e) => !cashflowUpdatesSubscribedItemId || !e.item_id || e.item_id === cashflowUpdatesSubscribedItemId);
+  }, [cashflowUpdatesCombinedEvents, CASHFLOW_UPDATES_QUALIFYING_CODES, cashflowUpdatesSubscribedItemId]);
+
+  const cashflowUpdatesCanForward = cashflowUpdatesQualifyingEvents.length > 0;
+
+  const handleCashflowUpdatesManualAdd = useCallback(() => {
+    const raw = cashflowUpdatesManualPayload.trim();
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+
+      const nextEvents: CashflowUpdatesWebhookEvent[] = arr
+        .map((obj: any, idx: number) => {
+          const payload = obj?.payload && typeof obj?.payload === 'object' ? obj.payload : obj;
+          const webhook_type = String(payload?.webhook_type || obj?.webhook_type || '').trim();
+          const webhook_code = String(payload?.webhook_code || obj?.webhook_code || '').trim();
+          const item_id = String(payload?.item_id || obj?.item_id || '').trim() || undefined;
+
+          if (!webhook_type || !webhook_code) return null;
+
+          return {
+            id: `manual_${Date.now()}_${idx}`,
+            webhook_type,
+            webhook_code,
+            item_id,
+            timestamp: new Date().toISOString(),
+            payload,
+          };
+        })
+        .filter(Boolean) as CashflowUpdatesWebhookEvent[];
+
+      if (nextEvents.length === 0) {
+        setCashflowUpdatesManualParseError('No webhook events detected. Expected objects with webhook_type + webhook_code.');
+        return;
+      }
+
+      setCashflowUpdatesManualWebhooks((prev) => [...nextEvents, ...prev]);
+      setCashflowUpdatesManualParseError(null);
+    } catch (err: any) {
+      setCashflowUpdatesManualParseError(err?.message || 'Invalid JSON');
+    }
+  }, [cashflowUpdatesManualPayload]);
+
+  const handleCashflowUpdatesSubscribe = useCallback(async () => {
+    if (!cashflowUpdatesSelectedItem?.item_id) return;
+    if (!effectiveWebhookConfigUrl) {
+      setErrorData({
+        error: 'WEBHOOK_URL_REQUIRED',
+        message: 'Configure a webhook URL in Advanced Settings before subscribing to Cashflow Updates.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    const credsFlag = usedAltCredentials || useAltCredentials;
+
+    const baseParams: any = {
+      item_id: cashflowUpdatesSelectedItem.item_id,
+      webhook: effectiveWebhookConfigUrl,
+      useAltCredentials: credsFlag,
+    };
+    if (usedUserToken && userToken) {
+      baseParams.user_token = userToken;
+    } else if (userId) {
+      baseParams.user_id = userId;
+    } else if (userToken) {
+      baseParams.user_token = userToken;
+    } else {
+      setErrorData({ error: 'MISSING_USER', message: 'Missing user_id/user_token for CRA flow.' });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    // Clear old events so Forward gating is for this subscription.
+    setWebhooks([]);
+    setCashflowUpdatesManualWebhooks([]);
+    setCashflowUpdatesManualParseError(null);
+
+    setModalState('cashflow-updates-subscribing');
+    setShowModal(true);
+
+    const resp = await fetch('/api/cra-cashflow-updates-subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(baseParams),
+    });
+    const json = await resp.json();
+
+    if (resp.status >= 400) {
+      setErrorData(json);
+      setApiStatusCode(resp.status);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    // Sandbox-only step (this app points to Sandbox): simulate a Cash Flow Update so Plaid
+    // immediately delivers a CASH_FLOW_UPDATES webhook (e.g. CASH_FLOW_INSIGHTS_UPDATED w/ LARGE_DEPOSIT_DETECTED).
+    // This is intentionally best-effort and should never block the UI.
+    fetch('/api/cra-cashflow-updates-sandbox-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        useAltCredentials: credsFlag,
+        webhook_codes: ['LARGE_DEPOSIT_DETECTED'],
+        ...(baseParams.user_id ? { user_id: baseParams.user_id } : {}),
+        ...(baseParams.user_token ? { user_token: baseParams.user_token } : {}),
+      }),
+    })
+      .then(async (r) => {
+        if (r.ok) return;
+        let payload: any = null;
+        try {
+          payload = await r.json();
+        } catch {
+          // ignore
+        }
+        console.warn('[CRA Cashflow Updates] sandbox update trigger failed', r.status, payload);
+      })
+      .catch((err) => {
+        console.warn('[CRA Cashflow Updates] sandbox update trigger failed', err);
+      });
+
+    setCashflowUpdatesSubscribedItemId(cashflowUpdatesSelectedItem.item_id);
+    setCashflowUpdatesSubscriptionResponse(json);
+    setModalState('cashflow-updates-webhooks');
+    setShowModal(true);
+  }, [
+    cashflowUpdatesSelectedItem,
+    effectiveWebhookConfigUrl,
+    usedAltCredentials,
+    useAltCredentials,
+    usedUserToken,
+    userToken,
+    userId,
+  ]);
+
+  const handleCashflowUpdatesFetchReport = useCallback(async () => {
+    const credsFlag = usedAltCredentials || useAltCredentials;
+
+    const baseParams: any = {
+      useAltCredentials: credsFlag,
+      consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+    };
+    if (usedUserToken && userToken) {
+      baseParams.user_token = userToken;
+    } else if (userId) {
+      baseParams.user_id = userId;
+    } else if (userToken) {
+      baseParams.user_token = userToken;
+    } else {
+      setErrorData({ error: 'MISSING_USER', message: 'Missing user_id/user_token for CRA flow.' });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    setModalState('cashflow-updates-fetching-report');
+    setShowModal(true);
+
+    const resp = await fetch('/api/cra-cashflow-updates-get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(baseParams),
+    });
+    const json = await resp.json();
+
+    if (resp.status >= 400) {
+      setErrorData(json);
+      setApiStatusCode(resp.status);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    setProductData(json);
+    setApiStatusCode(resp.status);
+    setModalState('success');
+    setShowModal(true);
+  }, [usedAltCredentials, useAltCredentials, usedUserToken, userToken, userId]);
+
   const renderModalContent = () => {
     if (modalState === 'update-mode-input') {
       const raw = updateModeAccessTokenInput.trim();
@@ -4391,6 +4814,114 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'cashflow-updates-loading-items') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Fetching your Items...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'cashflow-updates-pick-item') {
+      const selected = cashflowUpdatesSelectedItem;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Cashflow Updates</h2>
+          </div>
+
+          <div className="account-data">
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+              Select which Item you’d like to subscribe to Cashflow Updates.
+            </p>
+
+            <select
+              className="access-token-picker"
+              value={cashflowUpdatesSelectedIndex}
+              onChange={(e) => setCashflowUpdatesSelectedIndex(Number(e.target.value))}
+              aria-label="Select institution"
+            >
+              {cashflowUpdatesItems.map((it, idx) => (
+                <option key={`${it.item_id}_${idx}`} value={idx}>
+                  {it.institution_name}
+                </option>
+              ))}
+            </select>
+
+            {selected?.item_id && (
+              <div className="account-data config-data-with-edit" style={{ marginTop: 14 }}>
+                <JsonHighlight data={{ item_id: selected.item_id }} />
+              </div>
+            )}
+          </div>
+
+          <div className="modal-button-row two-buttons">
+            <ArrowButton variant="red" direction="back" onClick={handleStartOver} />
+            <ArrowButton variant="blue" onClick={handleCashflowUpdatesSubscribe} disabled={!selected?.item_id} />
+          </div>
+        </div>
+      );
+    }
+
+    if (modalState === 'cashflow-updates-subscribing') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Subscribing to Cashflow Updates...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'cashflow-updates-webhooks') {
+      const allowManualPaste = !IS_DEV;
+      const selected = cashflowUpdatesSelectedItem;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Cashflow Updates</h2>
+          </div>
+
+          {selected?.item_id && (
+            <div className="account-data">
+              <div className="account-data config-data-with-edit" style={{ marginTop: 0 }}>
+                <JsonHighlight data={{ institution_name: selected.institution_name, item_id: selected.item_id }} />
+              </div>
+              {cashflowUpdatesSubscriptionResponse && (
+                <div className="account-data config-data-with-edit" style={{ marginTop: 14 }}>
+                  <JsonHighlight data={cashflowUpdatesSubscriptionResponse} />
+                </div>
+              )}
+            </div>
+          )}
+
+          <CashflowUpdatesWebhookPanel
+            visible={true}
+            subscribedItemId={cashflowUpdatesSubscribedItemId}
+            events={cashflowUpdatesCombinedEvents}
+            allowManualPaste={allowManualPaste}
+            manualPayload={cashflowUpdatesManualPayload}
+            onManualPayloadChange={(value) => setCashflowUpdatesManualPayload(value)}
+            onManualAdd={handleCashflowUpdatesManualAdd}
+            manualParseError={cashflowUpdatesManualParseError}
+            canForward={cashflowUpdatesCanForward}
+            onForward={handleCashflowUpdatesFetchReport}
+          />
+        </div>
+      );
+    }
+
+    if (modalState === 'cashflow-updates-fetching-report') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Fetching Monitoring Insights report...</p>
+        </div>
+      );
+    }
+
     if (modalState === 'processing-product') {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
@@ -4698,6 +5229,7 @@ export default function Home() {
             ? PRODUCTS_ARRAY.filter(p => demoProductsVisibility[p.id])
             : PRODUCTS_ARRAY} 
           onSelect={handleProductSelect}
+          isDisabled={getProductDisableInfo}
           onSettingsClick={demoLinkCompleted ? undefined : handleOpenSettings}
           hasCustomSettings={hasCustomSettings}
           onResetClick={demoLinkCompleted ? handleStartOver : undefined}
@@ -4710,6 +5242,7 @@ export default function Home() {
               ? PRODUCT_CONFIGS[selectedProduct].children!.filter(c => demoProductsVisibility[c.id])
               : PRODUCT_CONFIGS[selectedProduct].children!} 
             onSelect={handleChildProductSelect}
+            isDisabled={getProductDisableInfo}
             onBack={() => {
               setShowChildModal(false);
               setShowProductModal(true);
@@ -4732,6 +5265,7 @@ export default function Home() {
                 ? childConfig.children.filter(gc => demoProductsVisibility[gc.id])
                 : childConfig.children} 
               onSelect={handleGrandchildProductSelect}
+              isDisabled={getProductDisableInfo}
               onBack={() => {
                 setShowGrandchildModal(false);
                 setSelectedGrandchildProduct(null);

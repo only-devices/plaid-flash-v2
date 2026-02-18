@@ -10,6 +10,7 @@ interface ProductSelectorProps {
   hasCustomSettings?: boolean;
   title?: string;
   onResetClick?: () => void;
+  isDisabled?: (productId: string) => { disabled: boolean; reason?: string };
 }
 
 const ProductSelector: React.FC<ProductSelectorProps> = ({ 
@@ -20,7 +21,8 @@ const ProductSelector: React.FC<ProductSelectorProps> = ({
   onSettingsClick,
   hasCustomSettings = false,
   title = 'Choose Your Own Adventure',
-  onResetClick
+  onResetClick,
+  isDisabled
 }) => {
   return (
     <div className="product-selector">
@@ -54,28 +56,57 @@ const ProductSelector: React.FC<ProductSelectorProps> = ({
       <h2 className="product-selector-title">{title}</h2>
       <p className="product-selector-subtitle"></p>
       <div className="product-grid">
-        {products.map((product) => (
-          <button
-            key={product.id}
-            className={`product-card ${product.icon ? 'has-icon' : ''}`}
-            onClick={() => onSelect(product.id)}
-            style={{ background: product.gradient }}
-          >
-            {product.icon && (
-              <div className="product-card-icon">
-                <img src={product.icon} alt={`${product.name} icon`} />
+        {products.map((product) => {
+          const disableInfo = isDisabled?.(product.id);
+          const disabled = !!disableInfo?.disabled;
+          const reason = disableInfo?.reason;
+
+          const card = (
+            <button
+              className={`product-card ${product.icon ? 'has-icon' : ''}`}
+              onClick={() => onSelect(product.id)}
+              style={{ background: product.gradient }}
+              disabled={disabled}
+              aria-disabled={disabled}
+            >
+              {product.icon && (
+                <div className="product-card-icon">
+                  <img src={product.icon} alt={`${product.name} icon`} />
+                </div>
+              )}
+              <div className="product-card-arrow">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <g transform="rotate(45 12 12)">
+                    <path
+                      d="M7 17L17 7M17 7H7M17 7V17"
+                      stroke="white"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
+                </svg>
               </div>
-            )}
-            <div className="product-card-arrow">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <g transform="rotate(45 12 12)">
-                <path d="M7 17L17 7M17 7H7M17 7V17" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </g>
-            </svg>
-            </div>
-            <h3 className="product-card-name">{product.shortName || product.name}</h3>
-          </button>
-        ))}
+              <h3 className="product-card-name">{product.shortName || product.name}</h3>
+            </button>
+          );
+
+          // Disabled buttons don't hover reliably and product cards have overflow hidden,
+          // so attach the tooltip to a wrapper element (same style as SettingsToggle).
+          if (disabled && reason) {
+            return (
+              <div key={product.id} className="product-card-tooltip-wrapper" data-tooltip={reason}>
+                {card}
+              </div>
+            );
+          }
+
+          return (
+            <React.Fragment key={product.id}>
+              {card}
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );
