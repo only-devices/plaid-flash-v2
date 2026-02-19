@@ -22,6 +22,9 @@ import { generateClientUserId } from '@/lib/generateClientUserId';
 const WEBHOOKS_ENABLED = isWebhooksEnabledClient();
 const IS_DEV = process.env.NODE_ENV === 'development';
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
+const DEFAULT_LAYER_TEMPLATE_ID = 'template_5xk9wmaarmlp';
+const DEFAULT_LAYER_PHONE_NUMBER = '+14155550011';
+const DEFAULT_LAYER_DATE_OF_BIRTH = '1975-01-18';
 
 type MultiItemAccessTokenInfo = {
   access_token: string;
@@ -59,7 +62,17 @@ export default function Home() {
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
   const [modalState, setModalState] = useState<
     | 'loading'
+    | 'layer-creating-session'
+    | 'layer-phone-submit'
+    | 'layer-waiting-eligibility'
+    | 'layer-dob-submit'
+    | 'layer-processing-session-get'
+    | 'layer-processing-user-update'
+    | 'layer-processing-check-report-create'
+    | 'layer-processing-identity-match'
+    | 'layer-identity-match-results'
     | 'preview-user-create'
+    | 'preview-user-update'
     | 'preview-config'
     | 'preview-sandbox-config'
     | 'preview-product-api'
@@ -110,6 +123,7 @@ export default function Home() {
   const [zapMode, setZapMode] = useState(false);
   const [embeddedMode, setEmbeddedMode] = useState(false);
   const [layerMode, setLayerMode] = useState(false);
+  const [layerIdentityMatchEnabled, setLayerIdentityMatchEnabled] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [multiItemLinkEnabled, setMultiItemLinkEnabled] = useState(false);
   const [hostedLinkEnabled, setHostedLinkEnabled] = useState(false);
@@ -117,6 +131,7 @@ export default function Home() {
   const [tempZapMode, setTempZapMode] = useState(false);
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
+  const [tempLayerIdentityMatchEnabled, setTempLayerIdentityMatchEnabled] = useState(false);
   const [tempDemoMode, setTempDemoMode] = useState(false);
   const [tempMultiItemLinkEnabled, setTempMultiItemLinkEnabled] = useState(false);
   const [tempHostedLinkEnabled, setTempHostedLinkEnabled] = useState(false);
@@ -149,6 +164,18 @@ export default function Home() {
   const [editedUserCreateConfig, setEditedUserCreateConfig] = useState('');
   const [userCreateConfigError, setUserCreateConfigError] = useState<string | null>(null);
 
+  // Layer + CRA: /user/update preview state (identity persistence before report creation)
+  const [userUpdateConfig, setUserUpdateConfig] = useState<any>(null);
+  const [isEditingUserUpdateConfig, setIsEditingUserUpdateConfig] = useState(false);
+  const [editedUserUpdateConfig, setEditedUserUpdateConfig] = useState('');
+  const [userUpdateConfigError, setUserUpdateConfigError] = useState<string | null>(null);
+  const [craLayerPendingAfterUserUpdate, setCraLayerPendingAfterUserUpdate] = useState<null | {
+    userId: string;
+    credsFlag: boolean;
+    webhook: string;
+    productsToCreate: string[];
+  }>(null);
+
   // Product API Preview state
   const [productApiConfig, setProductApiConfig] = useState<any>(null);
   const [isEditingProductApiConfig, setIsEditingProductApiConfig] = useState(false);
@@ -167,6 +194,11 @@ export default function Home() {
   const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
+  const webhookUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    webhookUrlRef.current = webhookUrl;
+  }, [webhookUrl]);
 
   // Hybrid CRA + non-CRA flow state (CRA product selected but Link config includes non-CRA products)
   const [hybridModeActive, setHybridModeActive] = useState(false);
@@ -195,6 +227,28 @@ export default function Home() {
   const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
   const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
   const hostedLinkPopupRef = useRef<Window | null>(null);
+  const [hostedWaitingMode, setHostedWaitingMode] = useState<'hosted_link' | 'cra_check_report'>('hosted_link');
+  const [craCheckReportExpectedUserId, setCraCheckReportExpectedUserId] = useState<string | null>(null);
+  const [craCheckReportManualReady, setCraCheckReportManualReady] = useState(false);
+
+  // Layer state
+  const [layerSessionActive, setLayerSessionActive] = useState(false);
+  const [layerPendingUserCreate, setLayerPendingUserCreate] = useState(false);
+  const [layerPendingProductId, setLayerPendingProductId] = useState<string | null>(null);
+  const [layerPhoneSubmitConfig, setLayerPhoneSubmitConfig] = useState<any>({ phone_number: DEFAULT_LAYER_PHONE_NUMBER });
+  const [isEditingLayerPhoneSubmitConfig, setIsEditingLayerPhoneSubmitConfig] = useState(false);
+  const [editedLayerPhoneSubmitConfig, setEditedLayerPhoneSubmitConfig] = useState(
+    JSON.stringify({ phone_number: DEFAULT_LAYER_PHONE_NUMBER }, null, 2)
+  );
+  const [layerPhoneSubmitConfigError, setLayerPhoneSubmitConfigError] = useState<string | null>(null);
+  const [layerDateOfBirth, setLayerDateOfBirth] = useState<string>(DEFAULT_LAYER_DATE_OF_BIRTH);
+  const [layerDobSubmitConfig, setLayerDobSubmitConfig] = useState<any>({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH });
+  const [isEditingLayerDobSubmitConfig, setIsEditingLayerDobSubmitConfig] = useState(false);
+  const [editedLayerDobSubmitConfig, setEditedLayerDobSubmitConfig] = useState(
+    JSON.stringify({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH }, null, 2)
+  );
+  const [layerDobSubmitConfigError, setLayerDobSubmitConfigError] = useState<string | null>(null);
+  const [layerIdentityMatchData, setLayerIdentityMatchData] = useState<any>(null);
 
   // Update Mode (Link-only) state
   const [updateModeAccessTokenInput, setUpdateModeAccessTokenInput] = useState<string>('');
@@ -218,6 +272,7 @@ export default function Home() {
     zapMode ||
     embeddedMode ||
     layerMode ||
+    layerIdentityMatchEnabled ||
     demoMode ||
     multiItemLinkEnabled ||
     hostedLinkEnabled ||
@@ -246,6 +301,28 @@ export default function Home() {
     (productId: string) => {
       const cfg = getProductConfigById(productId);
       const isLeaf = !!cfg?.apiEndpoint;
+
+      if (layerMode && useLegacyUserToken && isLeaf && cfg?.isCRA) {
+        return {
+          disabled: true,
+          reason: 'Layer + CRA requires user_id. Disable legacy user_token to continue.',
+        };
+      }
+
+      if (
+        layerMode &&
+        (productId === 'signal' ||
+          productId === 'signal-evaluate' ||
+          productId === 'signal-balance' ||
+          productId === 'investments-move' ||
+          productId === 'link-update-mode')
+      ) {
+        return {
+          disabled: true,
+          reason: 'Disable Layer in settings to use this product.',
+        };
+      }
+
       if (isLeaf && cfg?.requiresWebhook && !effectiveWebhookConfigUrl) {
         return {
           disabled: true,
@@ -254,7 +331,7 @@ export default function Home() {
       }
       return { disabled: false as const };
     },
-    [effectiveWebhookConfigUrl]
+    [effectiveWebhookConfigUrl, layerMode, useLegacyUserToken]
   );
 
   // Helper function to build API request body with product-specific params
@@ -434,6 +511,32 @@ export default function Home() {
     };
   }, []);
 
+  // Layer + CRA: if the check report fails while we're waiting, surface the failure immediately.
+  useEffect(() => {
+    if (hostedWaitingMode !== 'cra_check_report') return;
+    if (!craCheckReportExpectedUserId) return;
+    if (!Array.isArray(webhooks) || webhooks.length === 0) return;
+
+    const failed = webhooks.find((w: any) => {
+      const t = w?.webhook_type ?? w?.payload?.webhook_type;
+      const c = w?.webhook_code ?? w?.payload?.webhook_code;
+      if (t !== 'CHECK_REPORT') return false;
+      if (c !== 'USER_CHECK_REPORT_FAILED') return false;
+      const u = w?.payload?.user_id ?? w?.user_id;
+      return !u || u === craCheckReportExpectedUserId;
+    });
+
+    if (!failed) return;
+
+    setErrorData(failed?.payload ?? failed);
+    setApiStatusCode(200);
+    setHostedWaitingMode('hosted_link');
+    setCraCheckReportExpectedUserId(null);
+    setCraCheckReportManualReady(false);
+    setModalState('api-error');
+    setShowModal(true);
+  }, [hostedWaitingMode, craCheckReportExpectedUserId, webhooks]);
+
   const fetchLinkToken = async (productId: string) => {
     try {
       const productConfig = getProductConfigById(productId);
@@ -491,6 +594,9 @@ export default function Home() {
           setHostedLinkManualPayload('');
           setHostedLinkManualParseError(null);
           setHostedLinkExtractedPublicTokens([]);
+          setHostedWaitingMode('hosted_link');
+          setCraCheckReportExpectedUserId(null);
+          setCraCheckReportManualReady(false);
           setShowEventLogs(false);
           setShowWebhookPanel(false);
           setModalState('hosted-waiting');
@@ -600,6 +706,185 @@ export default function Home() {
     }
   };
 
+  const createLayerSessionToken = useCallback(
+    async (targetProductId: string, userForSession: { client_user_id: string; user_id: string }) => {
+      const cfg = getProductConfigById(targetProductId);
+      if (!cfg) return;
+
+      try {
+        setLayerSessionActive(true);
+        setLayerPhoneSubmitConfig({ phone_number: DEFAULT_LAYER_PHONE_NUMBER });
+        setIsEditingLayerPhoneSubmitConfig(false);
+        setEditedLayerPhoneSubmitConfig(JSON.stringify({ phone_number: DEFAULT_LAYER_PHONE_NUMBER }, null, 2));
+        setLayerPhoneSubmitConfigError(null);
+        setLayerDateOfBirth(DEFAULT_LAYER_DATE_OF_BIRTH);
+        setLayerDobSubmitConfig({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH });
+        setIsEditingLayerDobSubmitConfig(false);
+        setEditedLayerDobSubmitConfig(JSON.stringify({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH }, null, 2));
+        setLayerDobSubmitConfigError(null);
+        setWebhooks([]);
+        setLinkEvents([]);
+
+        // Don't show event/webhook side panels until Link is actually opened (LAYER_READY).
+        setShowEventLogs(false);
+        setEventLogsPosition('right');
+        setShowWebhookPanel(false);
+
+        setShowModal(true);
+        setShowWelcome(false);
+
+        const template_id = cfg.layerTemplateId || DEFAULT_LAYER_TEMPLATE_ID;
+        const client_user_id = String(userForSession?.client_user_id || '').trim();
+        const user_id = String(userForSession?.user_id || '').trim();
+        if (!client_user_id) {
+          throw new Error('Missing user.client_user_id for Layer session/token/create');
+        }
+        if (!user_id) {
+          throw new Error('Missing user_id for Layer session/token/create');
+        }
+
+        const resp = await fetch('/api/session-token-create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            template_id,
+            webhook: effectiveWebhookConfigUrl,
+            user: { client_user_id },
+            user_id,
+            useAltCredentials: usedAltCredentials || useAltCredentials,
+          }),
+        });
+
+        const json = await resp.json();
+        if (resp.status >= 400) {
+          setErrorData(json);
+          setApiStatusCode(resp.status);
+          setModalState('api-error');
+          setShowModal(true);
+          setShowWelcome(false);
+          return;
+        }
+
+        if (!json?.link_token || typeof json.link_token !== 'string') {
+          setErrorData({
+            error: 'LAYER_SESSION_TOKEN_CREATE_FAILED',
+            message: 'Backend did not return a valid link_token for Layer.',
+            raw: json,
+          });
+          setApiStatusCode(502);
+          setModalState('api-error');
+          setShowModal(true);
+          setShowWelcome(false);
+          return;
+        }
+
+        setLinkToken(json.link_token);
+        setModalState('layer-phone-submit');
+        setShowModal(true);
+        setShowWelcome(false);
+      } catch (e: any) {
+        setErrorData({
+          error: 'LAYER_SESSION_TOKEN_CREATE_FAILED',
+          message: e?.message || 'Failed to create Layer session token',
+        });
+        setApiStatusCode(500);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+      }
+    },
+    [effectiveWebhookConfigUrl, usedAltCredentials, useAltCredentials, webhookUrl]
+  );
+
+  const runNonCraFlowWithAccessToken = useCallback(
+    async (access_token: string) => {
+      const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      if (!effectiveProductId) return;
+
+      // Store access token for cleanup
+      setAccessToken(access_token);
+
+      // If in Demo Mode, store access token and show product selector
+      if (demoMode) {
+        setDemoAccessToken(access_token);
+        setDemoLinkCompleted(true);
+        setShowModal(false);
+        setShowProductModal(true);
+        return;
+      }
+
+      const skipAccountsGet = effectiveProductId === 'signal-balance';
+
+      if (skipAccountsGet) {
+        setModalState('processing-product');
+        setShowModal(true);
+
+        const productConfig = getProductConfigById(effectiveProductId);
+        if (!productConfig || !productConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+
+        const requestBody = buildProductRequestBody(
+          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+          productConfig
+        );
+
+        const productResponse = await fetch(productConfig.apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        const productJson = await productResponse.json();
+        if (productResponse.status >= 400) {
+          setErrorData(productJson);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        setProductData(productJson);
+        setApiStatusCode(productResponse.status);
+        setModalState('success');
+        setShowModal(true);
+        return;
+      }
+
+      // Get accounts data
+      setModalState('processing-accounts');
+      setShowModal(true);
+
+      const accountsResponse = await fetch('/api/accounts-get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+      });
+
+      const accountsJson = await accountsResponse.json();
+      if (accountsResponse.status >= 400) {
+        setErrorData(accountsJson);
+        setApiStatusCode(accountsResponse.status);
+        setModalState('api-error');
+        setShowModal(true);
+        return;
+      }
+
+      setAccountsData(accountsJson);
+      setApiStatusCode(accountsResponse.status);
+      setModalState('accounts-data');
+      setShowModal(true);
+    },
+    [
+      demoMode,
+      selectedGrandchildProduct,
+      selectedChildProduct,
+      selectedProduct,
+      usedAltCredentials,
+      useAltCredentials,
+    ]
+  );
+
   const showLinkConfigPreview = (productId: string) => {
     const productConfig = getProductConfigById(productId);
     if (!productConfig) {
@@ -612,6 +897,41 @@ export default function Home() {
       setModalState('update-mode-input');
       setShowModal(true);
       setShowWelcome(false);
+      return;
+    }
+
+    // Layer flow: use /session/token/create + submit-driven eligibility
+    if (layerMode) {
+      if (!effectiveWebhookConfigUrl) {
+        setErrorData({
+          error: 'WEBHOOK_URL_REQUIRED',
+          message: 'Configure a webhook URL in Settings before using Layer.',
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      if (useLegacyUserToken) {
+        setErrorData({
+          error: 'LAYER_LEGACY_UNSUPPORTED',
+          message: 'Layer requires user_id. Disable legacy user_token to continue.',
+          productId,
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      // Layer always requires a /user/create step so we have a user_id
+      // to pass into /session/token/create as user.user_id.
+      setLayerPendingUserCreate(true);
+      setLayerPendingProductId(productId);
+      showUserCreatePreview(productId);
       return;
     }
 
@@ -720,6 +1040,11 @@ export default function Home() {
     if (isNonCraMultiItemUserCreate) {
       userConfig = {
         client_user_id: 'multi_item_user_' + Date.now(),
+      };
+    } else if (layerMode && productConfig.isCRA && !useLegacyUserToken) {
+      // Layer + CRA (user_id flow): identity will be collected in Layer and persisted later via /user/update.
+      userConfig = {
+        client_user_id: 'flash_cra_user_' + Date.now(),
       };
     } else if (useLegacyUserToken) {
       // Legacy format using consumer_report_user_identity
@@ -845,7 +1170,51 @@ export default function Home() {
         setUserId(newUserId);
         setUserToken(null);
       }
-      
+
+      // Layer legacy mode: continue into /session/token/create by passing user_token under user.user_id
+      if (layerMode && layerPendingUserCreate) {
+        const productIdForLayer =
+          layerPendingProductId || selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+        const clientUserIdForSession = String(configToUse?.client_user_id || userCreateConfig?.client_user_id || '').trim();
+
+        setLayerPendingUserCreate(false);
+        setLayerPendingProductId(null);
+        if (productIdForLayer) {
+          if (!clientUserIdForSession) {
+            setErrorData({
+              error: 'LAYER_MISSING_CLIENT_USER_ID',
+              message: 'Missing client_user_id for Layer session token creation. Please edit /user/create config and try again.',
+            });
+            setApiStatusCode(400);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+          if (!newUserId) {
+            setErrorData({
+              error: 'LAYER_MISSING_USER_ID',
+              message: 'Plaid did not return a user_id from /user/create. Layer requires user_id.',
+              response: data,
+            });
+            setApiStatusCode(502);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          await createLayerSessionToken(productIdForLayer, { client_user_id: clientUserIdForSession, user_id: newUserId });
+        } else {
+          setErrorData({
+            error: 'LAYER_MISSING_PRODUCT',
+            message: 'Missing product context for Layer session token creation.',
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+          setShowModal(true);
+        }
+        return;
+      }
+
       // Now show the link token config preview - pass values directly since state update is async
       showCRALinkConfigPreview(newUserId, newUserToken);
     } catch (error: any) {
@@ -1010,6 +1379,172 @@ export default function Home() {
     setEditedUserCreateConfig('');
   };
 
+  const validateUserUpdatePayload = (payload: any): string | null => {
+    if (!payload || typeof payload !== 'object') {
+      return 'Invalid JSON: payload must be an object';
+    }
+
+    const identity = payload.identity;
+    if (!identity || typeof identity !== 'object') {
+      return 'Invalid JSON: identity object is required';
+    }
+
+    const addresses = identity.addresses;
+    if (Array.isArray(addresses) && addresses.length > 0) {
+      const addr0 = addresses[0] || {};
+      const hasAnyAddressDetails = ['street_1', 'street_2', 'city', 'region', 'postal_code', 'country'].some((k) => {
+        const v = (addr0 as any)?.[k];
+        return typeof v === 'string' ? v.trim().length > 0 : v != null;
+      });
+      const street1 = typeof addr0?.street_1 === 'string' ? addr0.street_1.trim() : '';
+      if (hasAnyAddressDetails && !street1) {
+        return 'Invalid identity: addresses[0].street_1 is required when providing address details';
+      }
+    }
+
+    return null;
+  };
+
+  function sanitizeUserUpdateConfigForDisplay(config: any) {
+    if (!config || typeof config !== 'object') return config;
+    const copy: any = { ...config };
+    delete copy.useAltCredentials;
+    return copy;
+  }
+
+  const handleToggleUserUpdateEditMode = () => {
+    if (!isEditingUserUpdateConfig) {
+      const displayConfig = sanitizeUserUpdateConfigForDisplay(userUpdateConfig);
+      setEditedUserUpdateConfig(JSON.stringify(displayConfig, null, 2));
+      setUserUpdateConfigError(null);
+    }
+    setIsEditingUserUpdateConfig(!isEditingUserUpdateConfig);
+  };
+
+  const handleCancelUserUpdateEdit = () => {
+    setIsEditingUserUpdateConfig(false);
+    setUserUpdateConfigError(null);
+    setEditedUserUpdateConfig('');
+  };
+
+  const handleProceedWithUserUpdate = async (configOverride?: any) => {
+    const pending = craLayerPendingAfterUserUpdate;
+    const configToUse = configOverride || userUpdateConfig;
+    const validationError = validateUserUpdatePayload(configToUse);
+
+    if (validationError) {
+      setUserUpdateConfigError(validationError);
+      setModalState('preview-user-update');
+      setShowModal(true);
+      return;
+    }
+    if (!pending?.userId || !pending?.webhook) {
+      setErrorData({
+        error: 'LAYER_CRA_MISSING_CONTEXT',
+        message: 'Missing Layer + CRA pending context for report creation. Please restart the flow.',
+      });
+      setApiStatusCode(500);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    setModalState('layer-processing-user-update');
+    setShowModal(true);
+    try {
+      const userUpdateResp = await fetch('/api/user-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: pending.userId,
+          identity: configToUse.identity,
+          useAltCredentials: pending.credsFlag,
+        }),
+      });
+      const userUpdateJson = await userUpdateResp.json();
+      if (userUpdateResp.status >= 400) {
+        setErrorData(userUpdateJson);
+        setApiStatusCode(userUpdateResp.status);
+        setModalState('api-error');
+        setShowModal(true);
+        return;
+      }
+
+      setModalState('layer-processing-check-report-create');
+      setShowModal(true);
+      const createResp = await fetch('/api/cra-check-report-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: pending.userId,
+          webhook: pending.webhook,
+          days_requested: 365,
+          consumer_report_permissible_purpose: 'LEGITIMATE_BUSINESS_NEED_OTHER',
+          products: pending.productsToCreate,
+          useAltCredentials: pending.credsFlag,
+        }),
+      });
+      const createJson = await createResp.json();
+      if (createResp.status >= 400) {
+        setErrorData(createJson);
+        setApiStatusCode(createResp.status);
+        setModalState('api-error');
+        setShowModal(true);
+        return;
+      }
+
+      // Step D: wait for CHECK_REPORT / USER_CHECK_REPORT_READY webhook (reuse hosted-waiting view)
+      setHostedWaitingMode('cra_check_report');
+      setCraCheckReportExpectedUserId(pending.userId);
+      setCraCheckReportManualReady(false);
+      setHostedLinkUrl(null);
+      setHostedLinkManualPayload('');
+      setHostedLinkManualParseError(null);
+      setHostedLinkExtractedPublicTokens([]);
+      setWebhooks([]);
+      setCraLayerPendingAfterUserUpdate(null);
+      setModalState('hosted-waiting');
+      setShowModal(true);
+    } catch (error: any) {
+      setErrorData({
+        error: 'LAYER_CRA_USER_UPDATE_FAILED',
+        message: error?.message || 'Failed to update CRA user identity.',
+      });
+      setApiStatusCode(500);
+      setModalState('api-error');
+      setShowModal(true);
+    }
+  };
+
+  const handleSaveAndProceedUserUpdate = async () => {
+    try {
+      const parsed = JSON.parse(editedUserUpdateConfig);
+      // Never allow internal-only params to be persisted from the editor.
+      if (parsed && typeof parsed === 'object') {
+        delete (parsed as any).useAltCredentials;
+      }
+
+      const validationError = validateUserUpdatePayload(parsed);
+      if (validationError) {
+        setUserUpdateConfigError(validationError);
+        return;
+      }
+
+      // Ensure we always send the real user_id for this flow.
+      const pending = craLayerPendingAfterUserUpdate;
+      if (pending?.userId) {
+        (parsed as any).user_id = pending.userId;
+      }
+
+      setUserUpdateConfig(parsed);
+      setUserUpdateConfigError(null);
+      setIsEditingUserUpdateConfig(false);
+      await handleProceedWithUserUpdate(parsed);
+    } catch (error: any) {
+      setUserUpdateConfigError(`Invalid JSON: ${error.message}`);
+    }
+  };
+
   const handleSaveAndProceedUserCreate = async () => {
     try {
       // Validate JSON first
@@ -1024,6 +1559,69 @@ export default function Home() {
       handleProceedWithUserCreate(parsed);
     } catch (error: any) {
       setUserCreateConfigError(`Invalid JSON: ${error.message}`);
+    }
+  };
+
+  const handleToggleLayerPhoneSubmitEditMode = () => {
+    if (!isEditingLayerPhoneSubmitConfig) {
+      setEditedLayerPhoneSubmitConfig(JSON.stringify(layerPhoneSubmitConfig, null, 2));
+      setLayerPhoneSubmitConfigError(null);
+    }
+    setIsEditingLayerPhoneSubmitConfig(!isEditingLayerPhoneSubmitConfig);
+  };
+
+  const handleCancelLayerPhoneSubmitEdit = () => {
+    setIsEditingLayerPhoneSubmitConfig(false);
+    setLayerPhoneSubmitConfigError(null);
+    setEditedLayerPhoneSubmitConfig('');
+  };
+
+  const handleSaveLayerPhoneSubmitConfig = () => {
+    try {
+      const parsed = JSON.parse(editedLayerPhoneSubmitConfig);
+      const phone_number = String(parsed?.phone_number || '').trim();
+      if (!phone_number) {
+        setLayerPhoneSubmitConfigError('Invalid JSON: phone_number is required');
+        return;
+      }
+
+      setLayerPhoneSubmitConfig({ phone_number });
+      setLayerPhoneSubmitConfigError(null);
+      setIsEditingLayerPhoneSubmitConfig(false);
+    } catch (error: any) {
+      setLayerPhoneSubmitConfigError(`Invalid JSON: ${error.message}`);
+    }
+  };
+
+  const handleToggleLayerDobSubmitEditMode = () => {
+    if (!isEditingLayerDobSubmitConfig) {
+      setEditedLayerDobSubmitConfig(JSON.stringify(layerDobSubmitConfig, null, 2));
+      setLayerDobSubmitConfigError(null);
+    }
+    setIsEditingLayerDobSubmitConfig(!isEditingLayerDobSubmitConfig);
+  };
+
+  const handleCancelLayerDobSubmitEdit = () => {
+    setIsEditingLayerDobSubmitConfig(false);
+    setLayerDobSubmitConfigError(null);
+    setEditedLayerDobSubmitConfig('');
+  };
+
+  const handleSaveLayerDobSubmitConfig = () => {
+    try {
+      const parsed = JSON.parse(editedLayerDobSubmitConfig);
+      const date_of_birth = String(parsed?.date_of_birth || '').trim();
+      if (!date_of_birth) {
+        setLayerDobSubmitConfigError('Invalid JSON: date_of_birth is required');
+        return;
+      }
+
+      setLayerDobSubmitConfig({ date_of_birth });
+      setLayerDateOfBirth(date_of_birth);
+      setLayerDobSubmitConfigError(null);
+      setIsEditingLayerDobSubmitConfig(false);
+    } catch (error: any) {
+      setLayerDobSubmitConfigError(`Invalid JSON: ${error.message}`);
     }
   };
 
@@ -1062,6 +1660,9 @@ export default function Home() {
         setHostedLinkManualPayload('');
         setHostedLinkManualParseError(null);
         setHostedLinkExtractedPublicTokens([]);
+        setHostedWaitingMode('hosted_link');
+        setCraCheckReportExpectedUserId(null);
+        setCraCheckReportManualReady(false);
         setShowEventLogs(false);
         setShowWebhookPanel(false);
         setModalState('hosted-waiting');
@@ -1099,6 +1700,9 @@ export default function Home() {
           setHostedLinkManualPayload('');
           setHostedLinkManualParseError(null);
           setHostedLinkExtractedPublicTokens([]);
+          setHostedWaitingMode('hosted_link');
+          setCraCheckReportExpectedUserId(null);
+          setCraCheckReportManualReady(false);
           setShowEventLogs(false);
           setShowWebhookPanel(false);
           setModalState('hosted-waiting');
@@ -1153,6 +1757,10 @@ export default function Home() {
     setModalState('loading');
     setIsEditingConfig(false);
     setConfigError(null);
+
+    // Cancel any in-progress Layer setup
+    setLayerPendingUserCreate(false);
+    setLayerPendingProductId(null);
     
     // Reset demo mode starting flag if it was set
     if (isDemoModeStarting) {
@@ -1598,6 +2206,7 @@ export default function Home() {
     setTempZapMode(zapMode);
     setTempEmbeddedMode(embeddedMode);
     setTempLayerMode(layerMode);
+    setTempLayerIdentityMatchEnabled(layerIdentityMatchEnabled);
     setTempDemoMode(demoMode);
     setTempMultiItemLinkEnabled(multiItemLinkEnabled);
     setTempHostedLinkEnabled(hostedLinkEnabled);
@@ -1632,6 +2241,7 @@ export default function Home() {
     setZapMode(tempZapMode);
     setEmbeddedMode(tempEmbeddedMode);
     setLayerMode(tempLayerMode);
+    setLayerIdentityMatchEnabled(tempLayerIdentityMatchEnabled);
     setDemoMode(tempDemoMode);
     setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
     setHostedLinkEnabled(tempHostedLinkEnabled);
@@ -1691,10 +2301,24 @@ export default function Home() {
   };
 
   const handleToggleLayer = () => {
-    // Disabled for now, but handler exists
-    if (!true) { // Will enable later
-      setTempLayerMode(!tempLayerMode);
+    const next = !tempLayerMode;
+    setTempLayerMode(next);
+
+    // Layer is incompatible with several Link modes. If enabling Layer, turn those off.
+    if (next) {
+      setTempEmbeddedMode(false);
+      setTempHostedLinkEnabled(false);
+      setTempMultiItemLinkEnabled(false);
+      setTempBypassLink(false);
+    } else {
+      // Turning Layer off: also turn off Layer-only subfeatures.
+      setTempLayerIdentityMatchEnabled(false);
     }
+  };
+
+  const handleToggleLayerIdentityMatch = () => {
+    if (!tempLayerMode) return;
+    setTempLayerIdentityMatchEnabled(!tempLayerIdentityMatchEnabled);
   };
 
   const handleToggleDemo = () => {
@@ -2224,6 +2848,21 @@ export default function Home() {
       return;
     }
 
+    // Layer: always show the standard callback-success modal (even if Zap is enabled)
+    if (layerSessionActiveRef.current) {
+      setEventLogsPosition('left');
+      setShowModal(true);
+      setModalState('callback-success');
+      setCallbackData({
+        public_token,
+        metadata,
+      });
+      if (WEBHOOKS_ENABLED && webhookUrl) {
+        setShowWebhookPanel(true);
+      }
+      return;
+    }
+
     if (zapMode) {
       // Zap Mode: skip callback modal, go directly to API calls
       handleZapModeSuccess(public_token, metadata);
@@ -2242,7 +2881,7 @@ export default function Home() {
         setShowWebhookPanel(true);
       }
     }
-  }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct]);
+  }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct, selectedGrandchildProduct, webhookUrl]);
 
   const handleProceedWithSuccess = async () => {
     // Start fade-out animation for both modals
@@ -2261,6 +2900,9 @@ export default function Home() {
     // Get the effective product ID to check product type
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = getProductConfigById(effectiveProductId!);
+    const callbackPublicToken: string | null =
+      typeof callbackData?.public_token === 'string' ? callbackData.public_token : null;
+    const isLayerProfileToken = !!callbackPublicToken && callbackPublicToken.startsWith('profile-');
 
     // Link-only: Update Mode does not run downstream APIs or cleanup; return to main menu.
     if (effectiveProductId === 'link-update-mode') {
@@ -2272,6 +2914,155 @@ export default function Home() {
     if (productConfig?.isCRA) {
       // CRA products: if hybrid is active, run exchange + sequential flow; otherwise keep existing CRA flow
       try {
+        // Layer + CRA: after Layer completes, persist identity via /user/update, then create a report via /cra/check_report/create.
+        if (layerMode && (layerSessionActive || isLayerProfileToken)) {
+          if (useLegacyUserToken) {
+            setErrorData({
+              error: 'LAYER_CRA_LEGACY_UNSUPPORTED',
+              message: 'Layer + CRA requires user_id. Disable legacy user_token to continue.',
+            });
+            setApiStatusCode(400);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          const credsFlag = usedAltCredentials || useAltCredentials;
+          const public_token = callbackPublicToken;
+          if (!public_token) {
+            throw new Error('Missing public_token for Layer + CRA flow');
+          }
+          if (!userId) {
+            throw new Error('Missing user_id for Layer + CRA flow');
+          }
+          if (!effectiveWebhookConfigUrl) {
+            throw new Error('Missing webhook URL for CRA report creation');
+          }
+
+          // Step A: /user_account/session/get
+          setModalState('layer-processing-session-get');
+          setShowModal(true);
+
+          const sessionResp = await fetch('/api/user-account-session-get', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+          });
+          const sessionJson = await sessionResp.json();
+          if (sessionResp.status >= 400) {
+            setErrorData(sessionJson);
+            setApiStatusCode(sessionResp.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          // Step B: /user/update (best-effort mapping from Layer identity)
+          const layerIdentity = sessionJson?.identity || {};
+          const nameObj = layerIdentity?.name || {};
+          const given_name = String(nameObj?.given_name || nameObj?.first_name || nameObj?.given || '').trim();
+          const family_name = String(nameObj?.family_name || nameObj?.last_name || nameObj?.family || '').trim();
+          const date_of_birth = String(layerIdentity?.date_of_birth || layerIdentity?.dob || '').trim();
+
+          const extractPrimaryEmail = (identity: any): string => {
+            const candidates: any[] = [];
+
+            const pushFromArray = (arr: any[]) => {
+              for (const entry of arr) {
+                if (!entry) continue;
+                if (typeof entry === 'string') {
+                  candidates.push(entry);
+                  continue;
+                }
+                if (typeof entry === 'object') {
+                  candidates.push(
+                    entry.data,
+                    entry.email,
+                    entry.value,
+                    entry.address,
+                    entry.email_address,
+                    entry.emailAddress
+                  );
+                }
+              }
+            };
+
+            if (Array.isArray(identity?.emails)) pushFromArray(identity.emails);
+            if (Array.isArray(identity?.email_addresses)) pushFromArray(identity.email_addresses);
+
+            candidates.push(
+              identity?.email,
+              identity?.email_address,
+              identity?.emailAddress,
+              identity?.primary_email,
+              identity?.contact?.email
+            );
+
+            for (const raw of candidates) {
+              const v = String(raw || '').trim();
+              if (!v) continue;
+              return v;
+            }
+            return '';
+          };
+
+          const emailVal = extractPrimaryEmail(layerIdentity);
+          const emailForUpdate = (emailVal || 'carmen@example.com').trim();
+          const phoneVal =
+            Array.isArray(layerIdentity?.phone_numbers) && layerIdentity.phone_numbers.length > 0
+              ? String(layerIdentity.phone_numbers[0]?.data || layerIdentity.phone_numbers[0] || '').trim()
+              : String(layerIdentity?.phone_number || '').trim();
+
+          const addressCandidate =
+            (Array.isArray(layerIdentity?.addresses) && layerIdentity.addresses.length > 0
+              ? layerIdentity.addresses[0]
+              : layerIdentity?.address) || {};
+
+          const street_1 = String(addressCandidate?.street_1 || addressCandidate?.street || '').trim();
+          const street_2 = String(addressCandidate?.street_2 || '').trim();
+          const city = String(addressCandidate?.city || '').trim();
+          const region = String(addressCandidate?.region || addressCandidate?.state || '').trim();
+          const postal_code = String(addressCandidate?.postal_code || addressCandidate?.zip || '').trim();
+          const country = String(addressCandidate?.country || '').trim();
+
+          const addressBase: any = {
+            ...(street_1 ? { street_1 } : {}),
+            ...(street_2 ? { street_2 } : {}),
+            ...(city ? { city } : {}),
+            ...(region ? { region } : {}),
+            ...(postal_code ? { postal_code } : {}),
+            ...(country ? { country } : {}),
+          };
+          const address = Object.keys(addressBase).length > 0 ? { ...addressBase, primary: true } : null;
+
+          const identityUpdate: any = {
+            ...(given_name || family_name ? { name: { ...(given_name ? { given_name } : {}), ...(family_name ? { family_name } : {}) } } : {}),
+            ...(date_of_birth ? { date_of_birth } : {}),
+            emails: [{ data: emailForUpdate, primary: true }],
+            ...(phoneVal ? { phone_numbers: [{ data: phoneVal, primary: true }] } : {}),
+            ...(address ? { addresses: [address] } : {}),
+          };
+
+          const productsToCreate = Array.isArray(productConfig.products)
+            ? productConfig.products.filter((p) => p !== 'cra_base_report')
+            : [];
+
+          const nextPayload = { user_id: userId, identity: identityUpdate };
+          setUserUpdateConfig(nextPayload);
+          setUserUpdateConfigError(null);
+          setIsEditingUserUpdateConfig(false);
+          setEditedUserUpdateConfig('');
+          setCraLayerPendingAfterUserUpdate({
+            userId,
+            credsFlag,
+            webhook: effectiveWebhookConfigUrl,
+            productsToCreate,
+          });
+          setModalState('preview-user-update');
+          setShowModal(true);
+          return;
+        }
+
         if (hybridModeActive) {
           const credsFlag = usedAltCredentials || useAltCredentials;
           const { public_token } = callbackData || {};
@@ -2429,6 +3220,130 @@ export default function Home() {
       return;
     }
     
+    // Layer flow (non-CRA): get access_token + identity via /user_account/session/get
+    if (layerMode && layerSessionActive) {
+      try {
+        const credsFlag = usedAltCredentials || useAltCredentials;
+        const { public_token } = callbackData || {};
+        if (!public_token) {
+          throw new Error('Missing public_token for Layer flow');
+        }
+
+        setModalState('layer-processing-session-get');
+        setShowModal(true);
+
+        const sessionResp = await fetch('/api/user-account-session-get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+        });
+        const sessionJson = await sessionResp.json();
+        if (sessionResp.status >= 400) {
+          setErrorData(sessionJson);
+          setApiStatusCode(sessionResp.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        const firstAccessToken =
+          Array.isArray(sessionJson?.items) && sessionJson.items.length > 0
+            ? sessionJson.items[0]?.access_token
+            : null;
+
+        let access_token: string | null = typeof firstAccessToken === 'string' ? firstAccessToken : null;
+
+        // Fallback: if Layer didn't return an access_token, fall back to the normal public_token exchange.
+        if (!access_token) {
+          const exchangeResp = await fetch('/api/exchange-public-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+          });
+          const exchangeJson = await exchangeResp.json();
+          if (exchangeResp.status >= 400) {
+            setErrorData(exchangeJson);
+            setApiStatusCode(exchangeResp.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+          access_token = exchangeJson?.access_token || null;
+        }
+
+        if (!access_token) {
+          setErrorData({
+            error: 'LAYER_ACCESS_TOKEN_MISSING',
+            message: 'Unable to determine access_token from Layer session.',
+            session: sessionJson,
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        // Optional: Layer Identity Match
+        if (layerIdentityMatchEnabled) {
+          setModalState('layer-processing-identity-match');
+          setShowModal(true);
+
+          const identity = sessionJson?.identity || {};
+          const nameObj = identity?.name || {};
+          const firstName = nameObj?.first_name || nameObj?.given_name || '';
+          const lastName = nameObj?.last_name || nameObj?.family_name || '';
+          const legal_name = `${firstName} ${lastName}`.trim() || undefined;
+
+          const addressObj = identity?.address || {};
+          const userForMatch: any = {
+            ...(legal_name ? { legal_name } : {}),
+            ...(identity?.phone_number ? { phone_number: identity.phone_number } : {}),
+            ...(identity?.email ? { email_address: identity.email } : {}),
+            ...(addressObj && Object.keys(addressObj).length > 0
+              ? {
+                  address: {
+                    ...(addressObj.street ? { street: addressObj.street } : {}),
+                    ...(addressObj.street2 ? { street2: addressObj.street2 } : {}),
+                    ...(addressObj.city ? { city: addressObj.city } : {}),
+                    ...(addressObj.region ? { region: addressObj.region } : {}),
+                    ...(addressObj.postal_code ? { postal_code: addressObj.postal_code } : {}),
+                    ...(addressObj.country ? { country: addressObj.country } : {}),
+                  },
+                }
+              : {}),
+          };
+
+          const matchResp = await fetch('/api/identity-match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token, user: userForMatch, useAltCredentials: credsFlag }),
+          });
+          const matchJson = await matchResp.json();
+          if (matchResp.status >= 400) {
+            setErrorData(matchJson);
+            setApiStatusCode(matchResp.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+
+          setLayerIdentityMatchData(matchJson);
+          setAccessToken(access_token);
+          setModalState('layer-identity-match-results');
+          setShowModal(true);
+          return;
+        }
+
+        // Continue into the standard non-CRA flow (accounts/get → product APIs)
+        await runNonCraFlowWithAccessToken(access_token);
+      } catch (e: any) {
+        setErrorMessage(e?.message || 'Layer flow failed. Please try again.');
+        setModalState('error');
+        setShowModal(true);
+      }
+      return;
+    }
+
     // Non-CRA products: proceed with normal flow
     // Show processing state for accounts
     setModalState('processing-accounts');
@@ -2752,7 +3667,7 @@ export default function Home() {
     // Show webhook panel only for products that require webhooks (CRA products), except in Zap mode
     if (!zapMode) {
       // When multi-item is enabled for CRA products, keep CRA flow but do NOT show the webhook modal.
-      if (WEBHOOKS_ENABLED && webhookUrl && productConfig?.requiresWebhook) {
+      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
         setShowWebhookPanel(true);
       }
     }
@@ -2770,6 +3685,52 @@ export default function Home() {
       ...prevEvents,
       eventData
     ]);
+
+    // Layer eligibility events (after submit)
+    if (layerSessionActiveRef.current && modalStateRef.current === 'layer-waiting-eligibility') {
+      if (eventName === 'LAYER_READY') {
+        if (layerEligibilityBlockedRef.current) {
+          return;
+        }
+        setShowEventLogs(true);
+        setEventLogsPosition('right');
+        setShowWebhookPanel(WEBHOOKS_ENABLED && !!webhookUrlRef.current);
+        setShowModal(false);
+        try {
+          (openRef.current as any)?.();
+        } catch {
+          // ignore
+        }
+      } else if (eventName === 'LAYER_AUTOFILL_NOT_AVAILABLE') {
+        // Extended Autofill failed after submitting date_of_birth; do not open Link.
+        layerEligibilityBlockedRef.current = true;
+        setShowEventLogs(false);
+        setShowWebhookPanel(false);
+        setErrorData({
+          error: 'LAYER_AUTOFILL_NOT_AVAILABLE',
+          message:
+            'Extended Autofill is not available for this user/session. Please try again or return to the main menu.',
+          metadata,
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+      } else if (eventName === 'LAYER_NOT_AVAILABLE') {
+        // Hide Layer panels and close any Plaid UI before prompting for DOB.
+        try {
+          (exitRef.current as any)?.();
+        } catch {
+          // ignore
+        }
+        setShowEventLogs(false);
+        setShowWebhookPanel(false);
+        layerEligibilityBlockedRef.current = true;
+        // Prevent a near-simultaneous LAYER_READY from opening Link before React state updates.
+        modalStateRef.current = 'layer-dob-submit';
+        setModalState('layer-dob-submit');
+        setShowModal(true);
+      }
+    }
   }, []);
 
   const handleExitRetry = async () => {
@@ -2807,6 +3768,21 @@ export default function Home() {
     setLinkEvents([]);
     setShowProductModal(true);
 
+    // Reset Layer state
+    setLayerSessionActive(false);
+    setLayerPendingUserCreate(false);
+    setLayerPendingProductId(null);
+    setLayerPhoneSubmitConfig({ phone_number: DEFAULT_LAYER_PHONE_NUMBER });
+    setIsEditingLayerPhoneSubmitConfig(false);
+    setEditedLayerPhoneSubmitConfig(JSON.stringify({ phone_number: DEFAULT_LAYER_PHONE_NUMBER }, null, 2));
+    setLayerPhoneSubmitConfigError(null);
+    setLayerDateOfBirth(DEFAULT_LAYER_DATE_OF_BIRTH);
+    setLayerDobSubmitConfig({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH });
+    setIsEditingLayerDobSubmitConfig(false);
+    setEditedLayerDobSubmitConfig(JSON.stringify({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH }, null, 2));
+    setLayerDobSubmitConfigError(null);
+    setLayerIdentityMatchData(null);
+
     // Reset embedded Link state
     setEmbeddedLinkActive(false);
     setEmbeddedInstitutionSelected(false);
@@ -2824,7 +3800,88 @@ export default function Home() {
     onEvent,
   };
 
-  const { open, ready } = usePlaidLink(config);
+  const { open, ready, submit, exit } = usePlaidLink(config as any);
+
+  const modalStateRef = useRef(modalState);
+  const layerSessionActiveRef = useRef(layerSessionActive);
+  const readyRef = useRef(ready);
+  const layerEligibilityBlockedRef = useRef(false);
+  const openRef = useRef(open);
+  const submitRef = useRef(submit);
+  const exitRef = useRef(exit);
+
+  useEffect(() => {
+    modalStateRef.current = modalState;
+  }, [modalState]);
+  useEffect(() => {
+    layerSessionActiveRef.current = layerSessionActive;
+  }, [layerSessionActive]);
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+  useEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
+  useEffect(() => {
+    exitRef.current = exit;
+  }, [exit]);
+
+  const handleLayerSubmitPhone = useCallback(() => {
+    if (!readyRef.current) return;
+    const fn = submitRef.current as any;
+    if (!fn) return;
+    try {
+      const phone_number = String(layerPhoneSubmitConfig?.phone_number || '').trim();
+      if (!phone_number) return;
+      fn({ phone_number });
+    } catch (e: any) {
+      setErrorData({
+        error: 'LAYER_SUBMIT_FAILED',
+        message: e?.message || 'Failed to submit phone_number. Please try again.',
+      });
+      setApiStatusCode(500);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+    layerEligibilityBlockedRef.current = false;
+    modalStateRef.current = 'layer-waiting-eligibility';
+    // No need for an intermediate "waiting" modal — Layer generally opens immediately.
+    setShowModal(false);
+  }, [layerPhoneSubmitConfig]);
+
+  const handleLayerSubmitDob = useCallback(() => {
+    if (!readyRef.current) return;
+    const fn = submitRef.current as any;
+    if (!fn) return;
+    try {
+      const date_of_birth = String(layerDobSubmitConfig?.date_of_birth || '').trim();
+      if (!date_of_birth) return;
+      fn({ date_of_birth });
+    } catch (e: any) {
+      setErrorData({
+        error: 'LAYER_SUBMIT_FAILED',
+        message: e?.message || 'Failed to submit date_of_birth. Please try again.',
+      });
+      setApiStatusCode(500);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+    layerEligibilityBlockedRef.current = false;
+    modalStateRef.current = 'layer-waiting-eligibility';
+    // No need for an intermediate "waiting" modal — Layer generally opens immediately.
+    setShowModal(false);
+  }, [layerDobSubmitConfig]);
+
+  const handleProceedAfterLayerIdentityMatch = useCallback(async () => {
+    if (!accessToken) return;
+    setLayerIdentityMatchData(null);
+    await runNonCraFlowWithAccessToken(accessToken);
+  }, [accessToken, runNonCraFlowWithAccessToken]);
 
   // Open embedded Link - just shows the container, the useEffect below handles initialization
   const openEmbeddedLink = useCallback(() => {
@@ -2930,7 +3987,8 @@ export default function Home() {
   useEffect(() => {
     // In Demo Mode, we can open Link without a selected product
     // In normal mode, we need a selected product
-    const shouldOpenLink = ready && linkToken && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
+    // Layer sessions manage opening Link via LAYER_READY (never auto-open here).
+    const shouldOpenLink = ready && linkToken && !layerSessionActive && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
       (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
@@ -2949,7 +4007,7 @@ export default function Home() {
         open();
       }
     }
-  }, [ready, linkToken, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showChildModal, showGrandchildModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
+  }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showChildModal, showGrandchildModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
 
   const handleButtonClick = () => {
     // Show product selection modal instead of opening Link directly
@@ -3031,6 +4089,9 @@ export default function Home() {
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setHostedLinkExtractedPublicTokens([]);
+    setHostedWaitingMode('hosted_link');
+    setCraCheckReportExpectedUserId(null);
+    setCraCheckReportManualReady(false);
 
     // Reset Cashflow Updates state
     setCashflowUpdatesItems([]);
@@ -3263,9 +4324,21 @@ export default function Home() {
     setIsEditingUserCreateConfig(false);
     setEditedUserCreateConfig('');
     setUserCreateConfigError(null);
+    setUserUpdateConfig(null);
+    setIsEditingUserUpdateConfig(false);
+    setEditedUserUpdateConfig('');
+    setUserUpdateConfigError(null);
+    setCraLayerPendingAfterUserUpdate(null);
 
     // Reset Update Mode state
     setUpdateModeAccessTokenInput('');
+
+    // Reset Layer state
+    setLayerSessionActive(false);
+    setLayerPendingUserCreate(false);
+    setLayerPendingProductId(null);
+    setLayerDateOfBirth(DEFAULT_LAYER_DATE_OF_BIRTH);
+    setLayerIdentityMatchData(null);
 
     // Reset webhook panel (but keep SSE connection open)
     setShowWebhookPanel(false);
@@ -3871,6 +4944,42 @@ export default function Home() {
     }
   };
 
+  const handleCraLayerReportReadyForward = useCallback(() => {
+    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+    if (!productConfig?.isCRA || !productConfig.apiEndpoint) return;
+
+    const credsFlag = usedAltCredentials || useAltCredentials;
+    if (!userId) {
+      setErrorData({
+        error: 'MISSING_USER_ID',
+        message: 'Missing user_id for CRA report fetch.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    const requestBody = buildProductRequestBody({ user_id: userId, useAltCredentials: credsFlag }, productConfig);
+    setProductApiConfig(requestBody);
+    setHostedWaitingMode('hosted_link');
+    setCraCheckReportExpectedUserId(null);
+    setCraCheckReportManualReady(false);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setModalState('preview-product-api');
+    setShowModal(true);
+  }, [
+    selectedGrandchildProduct,
+    selectedChildProduct,
+    selectedProduct,
+    usedAltCredentials,
+    useAltCredentials,
+    userId,
+    buildProductRequestBody,
+  ]);
+
   const handleSelectMultiItemAccessToken = async (nextIndex: number) => {
     try {
       if (!Number.isFinite(nextIndex) || nextIndex < 0 || nextIndex >= multiItemAccessTokens.length) {
@@ -4329,6 +5438,181 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'layer-phone-submit') {
+      const canSubmit = !!ready && String(layerPhoneSubmitConfig?.phone_number || '').trim().length > 0;
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Layer: submit phone number</h2>
+          </div>
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85, fontSize: 13 }}>
+              Use 415-555-0012 for Extended Autofill testing.
+            </p>
+          {!isEditingLayerPhoneSubmitConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button
+                  className="config-edit-button"
+                  onClick={handleToggleLayerPhoneSubmitEditMode}
+                  title="Edit configuration"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <JsonHighlight data={layerPhoneSubmitConfig} />
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={returnToProductMenuNoRemove} />
+                <ArrowButton variant="blue" disabled={!canSubmit} onClick={handleLayerSubmitPhone} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedLayerPhoneSubmitConfig}
+                  language="json"
+                  onChange={(e) => setEditedLayerPhoneSubmitConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '12px',
+                    minHeight: '200px',
+                    maxHeight: '320px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {layerPhoneSubmitConfigError && <div className="config-error">{layerPhoneSubmitConfigError}</div>}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelLayerPhoneSubmitEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveLayerPhoneSubmitConfig} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-dob-submit') {
+      const canSubmit = !!ready && String(layerDobSubmitConfig?.date_of_birth || '').trim().length > 0;
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>⛔️ LAYER_NOT_AVAILABLE</h2>
+          </div>
+          <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85, fontSize: 13 }}>
+              Submit the user's date of birth to attempt Extended Autofill, or return to the main menu.
+            </p>
+          {!isEditingLayerDobSubmitConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button
+                  className="config-edit-button"
+                  onClick={handleToggleLayerDobSubmitEditMode}
+                  title="Edit configuration"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <JsonHighlight data={layerDobSubmitConfig} />
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={returnToProductMenuNoRemove} />
+                <ArrowButton variant="blue" disabled={!canSubmit} onClick={handleLayerSubmitDob} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedLayerDobSubmitConfig}
+                  language="json"
+                  onChange={(e) => setEditedLayerDobSubmitConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '12px',
+                    minHeight: '200px',
+                    maxHeight: '320px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {layerDobSubmitConfigError && <div className="config-error">{layerDobSubmitConfigError}</div>}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelLayerDobSubmitEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveLayerDobSubmitConfig} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-processing-session-get') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Fetching Layer session data...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-processing-user-update') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Updating CRA identity...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-processing-check-report-create') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Creating CRA check report...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-processing-identity-match') {
+      return (
+        <div className="modal-loading">
+          <div className="spinner"></div>
+          <p>Running Identity Match...</p>
+        </div>
+      );
+    }
+
+    if (modalState === 'layer-identity-match-results') {
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Layer: Identity Match</h2>
+          </div>
+          <div className="account-data">
+            <JsonHighlight data={layerIdentityMatchData || {}} />
+          </div>
+          <div className="modal-button-row two-buttons">
+            <ArrowButton variant="red" direction="back" onClick={returnToProductMenuNoRemove} />
+            <ArrowButton variant="blue" onClick={handleProceedAfterLayerIdentityMatch} />
+          </div>
+        </div>
+      );
+    }
+
     // CRA: User Create Preview Modal
     if (modalState === 'preview-user-create' && userCreateConfig) {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
@@ -4388,6 +5672,74 @@ export default function Home() {
               <div className="modal-button-row two-buttons">
                 <ArrowButton variant="red" direction="back" onClick={handleCancelUserCreateEdit} />
                 <ArrowButton variant="blue" onClick={handleSaveAndProceedUserCreate} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // Layer + CRA: User Update Preview Modal
+    if (modalState === 'preview-user-update' && userUpdateConfig) {
+      const displayConfig = sanitizeUserUpdateConfigForDisplay(userUpdateConfig);
+      const validationError = validateUserUpdatePayload(userUpdateConfig);
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Layer + CRA: Here&apos;s the /user/update payload that will be sent:</h2>
+          </div>
+          {!isEditingUserUpdateConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button className="config-edit-button" onClick={handleToggleUserUpdateEditMode} title="Edit configuration">
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <JsonHighlight data={displayConfig} />
+              </div>
+              {(userUpdateConfigError || validationError) && (
+                <div className="config-error">{userUpdateConfigError || validationError}</div>
+              )}
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={returnToProductMenuNoRemove} />
+                <ArrowButton variant="blue" disabled={!!(userUpdateConfigError || validationError)} onClick={() => handleProceedWithUserUpdate()} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedUserUpdateConfig}
+                  language="json"
+                  onChange={(e) => setEditedUserUpdateConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '12px',
+                    minHeight: '400px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {userUpdateConfigError && <div className="config-error">{userUpdateConfigError}</div>}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelUserUpdateEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveAndProceedUserUpdate} />
               </div>
             </>
           )}
@@ -4709,15 +6061,16 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
       const isUpdateMode = effectiveProductId === 'link-update-mode';
-      const allowForwardWithoutTokens = (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
+      const isCraReportWaiting = hostedWaitingMode === 'cra_check_report';
+      const allowForwardWithoutTokens = !isCraReportWaiting && (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
 
       return (
         <div className="modal-success">
           <div className="success-header">
-            <h2>Hosted Link</h2>
+            <h2>{isCraReportWaiting ? 'CRA Report' : 'Hosted Link'}</h2>
           </div>
 
-          {hostedLinkUrl && (
+          {!isCraReportWaiting && hostedLinkUrl && (
             <div style={{ marginBottom: 12 }}>
               <button
                 className="action-button button-blue"
@@ -4739,15 +6092,31 @@ export default function Home() {
               enabled={true}
               linkToken={linkToken}
               webhooks={webhooks}
-              onForward={isUpdateMode ? () => returnToProductMenuNoRemove() : handleHostedLinkForward}
+              onForward={(tokens) =>
+                isCraReportWaiting
+                  ? handleCraLayerReportReadyForward()
+                  : isUpdateMode
+                    ? returnToProductMenuNoRemove()
+                    : handleHostedLinkForward(tokens)
+              }
               title="Webhooks"
               allowForwardWithoutTokens={allowForwardWithoutTokens}
+              mode={isCraReportWaiting ? 'check_report' : 'link'}
+              expectedUserId={isCraReportWaiting ? craCheckReportExpectedUserId : null}
             />
           ) : (
             <>
               <div className="account-data">
                 <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
-                  Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
+                  {isCraReportWaiting ? (
+                    <>
+                      Paste the full <code>USER_CHECK_REPORT_READY</code> webhook JSON payload below.
+                    </>
+                  ) : (
+                    <>
+                      Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
+                    </>
+                  )}
                 </p>
                 <textarea
                   value={hostedLinkManualPayload}
@@ -4757,14 +6126,35 @@ export default function Home() {
                     if (!text.trim()) {
                       setHostedLinkManualParseError(null);
                       setHostedLinkExtractedPublicTokens([]);
+                      setCraCheckReportManualReady(false);
                       return;
                     }
                     try {
-                      const tokens = parseHostedLinkSessionFinished(text);
-                      setHostedLinkExtractedPublicTokens(tokens);
-                      setHostedLinkManualParseError(null);
+                      if (isCraReportWaiting) {
+                        const parsed = JSON.parse(text);
+                        const webhook_type = parsed?.webhook_type;
+                        const webhook_code = parsed?.webhook_code;
+                        const user_id = parsed?.user_id;
+                        if (webhook_type !== 'CHECK_REPORT') {
+                          throw new Error('Expected webhook_type CHECK_REPORT');
+                        }
+                        if (webhook_code !== 'USER_CHECK_REPORT_READY') {
+                          throw new Error('Expected webhook_code USER_CHECK_REPORT_READY');
+                        }
+                        if (craCheckReportExpectedUserId && user_id && user_id !== craCheckReportExpectedUserId) {
+                          throw new Error('Webhook user_id does not match current user');
+                        }
+                        setCraCheckReportManualReady(true);
+                        setHostedLinkManualParseError(null);
+                        setHostedLinkExtractedPublicTokens([]);
+                      } else {
+                        const tokens = parseHostedLinkSessionFinished(text);
+                        setHostedLinkExtractedPublicTokens(tokens);
+                        setHostedLinkManualParseError(null);
+                      }
                     } catch (err: any) {
                       setHostedLinkExtractedPublicTokens([]);
+                      setCraCheckReportManualReady(false);
                       setHostedLinkManualParseError(err?.message || 'Invalid payload');
                     }
                   }}
@@ -4781,7 +6171,11 @@ export default function Home() {
                     fontSize: 12,
                     resize: 'vertical',
                   }}
-                  placeholder='{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'
+                  placeholder={
+                    isCraReportWaiting
+                      ? '{\n  "webhook_type": "CHECK_REPORT",\n  "webhook_code": "USER_CHECK_REPORT_READY",\n  "user_id": "usr_..."\n}'
+                      : '{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'
+                  }
                 />
                 {hostedLinkManualParseError && (
                   <div className="config-error" style={{ marginTop: 10 }}>
@@ -4796,18 +6190,29 @@ export default function Home() {
                     setHostedLinkManualPayload('');
                     setHostedLinkManualParseError(null);
                     setHostedLinkExtractedPublicTokens([]);
+                    setCraCheckReportManualReady(false);
                   }}
                 >
                   Clear
                 </button>
                 <ArrowButton
                   variant="blue"
-                  onClick={() =>
-                    isUpdateMode
-                      ? returnToProductMenuNoRemove()
-                      : handleHostedLinkForward(hostedLinkExtractedPublicTokens)
+                  onClick={() => {
+                    if (isCraReportWaiting) {
+                      handleCraLayerReportReadyForward();
+                      return;
+                    }
+                    if (isUpdateMode) {
+                      returnToProductMenuNoRemove();
+                      return;
+                    }
+                    handleHostedLinkForward(hostedLinkExtractedPublicTokens);
+                  }}
+                  disabled={
+                    isCraReportWaiting
+                      ? !craCheckReportManualReady
+                      : !allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0
                   }
-                  disabled={!allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0}
                 />
               </div>
             </>
@@ -5350,8 +6755,29 @@ export default function Home() {
                     label="Layer"
                     checked={tempLayerMode}
                     onChange={handleToggleLayer}
-                    disabled={true}
-                    tooltip="Not quite yet"
+                  disabled={!effectiveWebhookConfigUrlForSettings || tempEmbeddedMode || tempHostedLinkEnabled || tempMultiItemLinkEnabled || tempBypassLink}
+                  tooltip={
+                    !effectiveWebhookConfigUrlForSettings
+                      ? (IS_DEV
+                          ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
+                          : 'Set your webhook URL below to enable Layer')
+                      : tempEmbeddedMode
+                        ? 'Disable Embedded Link to use Layer'
+                        : tempHostedLinkEnabled
+                          ? 'Disable Hosted Link to use Layer'
+                          : tempMultiItemLinkEnabled
+                            ? 'Disable Multi-item Link to use Layer'
+                            : tempBypassLink
+                              ? 'Disable Bypass Link to use Layer'
+                              : undefined
+                  }
+                />
+                <SettingsToggle
+                  label="Layer Identity Match"
+                  checked={tempLayerIdentityMatchEnabled}
+                  onChange={handleToggleLayerIdentityMatch}
+                  disabled={!tempLayerMode}
+                  tooltip={!tempLayerMode ? 'Enable Layer to use this' : undefined}
                   />
                 </>
               )}
@@ -5362,22 +6788,31 @@ export default function Home() {
                     label="Embedded Link"
                     checked={tempEmbeddedMode}
                     onChange={handleToggleEmbedded}
-                    disabled={false}
+                  disabled={tempLayerMode}
+                  tooltip={tempLayerMode ? 'Disable Layer to use Embedded Link' : undefined}
                   />
                   <SettingsToggle
                     label="Hosted Link"
                     checked={tempHostedLinkEnabled}
                     onChange={handleToggleHostedLink}
-                    disabled={!effectiveWebhookConfigUrlForSettings}
-                    tooltip={!effectiveWebhookConfigUrlForSettings ? 'Set your webhook URL below to enable Hosted Link' : undefined}
+                  disabled={tempLayerMode || !effectiveWebhookConfigUrlForSettings}
+                  tooltip={
+                    tempLayerMode
+                      ? 'Disable Layer to use Hosted Link'
+                      : !effectiveWebhookConfigUrlForSettings
+                        ? 'Set your webhook URL below to enable Hosted Link'
+                        : undefined
+                  }
                   />
                   <SettingsToggle
                     label="Multi-item Link"
                     checked={tempMultiItemLinkEnabled}
                     onChange={handleToggleMultiItemLink}
-                    disabled={!effectiveWebhookConfigUrlForSettings || tempBypassLink}
+                  disabled={tempLayerMode || !effectiveWebhookConfigUrlForSettings || tempBypassLink}
                     tooltip={
-                      tempBypassLink
+                    tempLayerMode
+                      ? 'Disable Layer to use Multi-item Link'
+                      : tempBypassLink
                         ? 'Disable Bypass Link to use Multi-item Link'
                         : !effectiveWebhookConfigUrlForSettings
                           ? (IS_DEV
@@ -5390,7 +6825,8 @@ export default function Home() {
                     label="Bypass Link"
                     checked={tempBypassLink}
                     onChange={handleToggleBypassLink}
-                    disabled={false}
+                  disabled={tempLayerMode}
+                  tooltip={tempLayerMode ? 'Disable Layer to use Bypass Link' : undefined}
                   />
                   <SettingsToggle
                     label="Include phone_number in Link Token Create config"

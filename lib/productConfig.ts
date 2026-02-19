@@ -34,6 +34,7 @@ export interface ProductConfig {
   icon?: string;
   isCRA?: boolean; // CRA products use user_id/user_token instead of access_token
   requiresWebhook?: boolean; // Products that need a webhook URL (like CRA)
+  layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
 }
 
 export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
@@ -55,7 +56,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         apiEndpoint: '/api/auth-get',
         apiTitle: '/auth/get',
         highlightKeys: ['numbers'],
-        icon: '/icons/auth.png'
+        icon: '/icons/auth.png',
+        layerTemplateId: 'template_5xk9wmaarmlp'
       },
       {
         id: 'signal',
@@ -111,7 +113,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             icon: '/icons/identity.png',
             apiEndpoint: '/api/identity-get',
             apiTitle: '/identity/get',
-            highlightKeys: ['owners']
+            highlightKeys: ['owners'],
+            layerTemplateId: 'template_qfw474kt3cho'
           },
           {
             id: 'identity-match',
@@ -137,7 +140,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
                 }
               }
             },
-            highlightKeys: ['legal_name', 'phone_number', 'email_address', 'address']
+            highlightKeys: ['legal_name', 'phone_number', 'email_address', 'address'],
+            layerTemplateId: 'template_qfw474kt3cho'
           }
         ]
       },
@@ -204,7 +208,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
                 override_username: "user_transactions_dynamic",
                 override_password: "pass_transactions_dynamic",
               }
-            }
+            },
+            layerTemplateId: 'template_xa92uqqdeole'
           },
           {
             id: 'transactions-sync',
@@ -227,7 +232,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
                 override_password: "pass_transactions_dynamic",
               }
             },
-            highlightKeys: ['added', 'has_more', 'modified', 'next_cursor', 'removed', 'transactions_update_status']
+            highlightKeys: ['added', 'has_more', 'modified', 'next_cursor', 'removed', 'transactions_update_status'],
+            layerTemplateId: 'template_xa92uqqdeole'
           }
         ],
       },
@@ -305,7 +311,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             days_requested: 365
           }
         },
-        requiresWebhook: true
+        requiresWebhook: true,
+        layerTemplateId: 'template_jbeu3j65l0z7'
       },
       {
         id: 'cra-income-insights',
@@ -329,7 +336,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             override_password: "{}",
           }
         },
-        requiresWebhook: true
+        requiresWebhook: true,
+        layerTemplateId: 'template_phj5hyzpc3v5'
       },
       {
         id: 'cra-partner-insights',
@@ -346,7 +354,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         additionalLinkParams: {
           consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
         },
-        requiresWebhook: true
+        requiresWebhook: true,
+        layerTemplateId: 'template_phj5hyzpc3v5'
       },
       {
         id: 'cra-cashflow-insights',
@@ -363,7 +372,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         additionalLinkParams: {
           consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
         },
-        requiresWebhook: true
+        requiresWebhook: true,
+        layerTemplateId: 'template_phj5hyzpc3v5'
       },
       {
         id: 'cra-cashflow-updates',
@@ -383,7 +393,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         additionalLinkParams: {
           consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
         },
-        requiresWebhook: true
+        requiresWebhook: true,
+        layerTemplateId: 'template_phj5hyzpc3v5'
       }
     ]
   },

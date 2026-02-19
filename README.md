@@ -79,6 +79,16 @@ When **Hosted Link** is enabled:
 - The app opens Hosted Link in a new tab and waits for `LINK/SESSION_FINISHED`
 - After completion, it continues with the standard exchange → accounts → product flow
 
+### Layer flow
+
+When **Layer** is enabled, Plaid Flash uses **Layer + Link** (behind the scenes) instead of calling `/link/token/create` directly:
+
+- **Prereqs**: you must set a **Webhook URL** in Settings (Layer relies on webhooks).
+- The app runs `/user/create`, then `/session/token/create` (using the selected product’s `template_id`).
+- You’ll be prompted to `submit({ phone_number })`. If `LAYER_NOT_AVAILABLE` occurs, you can `submit({ date_of_birth })` for Extended Autofill.
+- After Layer is ready, Link opens and returns `public_token` via `onSuccess` (then the app continues with the normal flow).
+- **Layer + CRA**: after Link completes, the app calls `/user_account/session/get`, then **previews `/user/update` (editable)** to persist identity, then calls `/cra/check_report/create` and waits for a `USER_CHECK_REPORT_READY` webhook before running the CRA `/get` endpoint.
+
 ### Update Mode
 
 Under **Link → Update Mode**, you can paste:
@@ -133,7 +143,7 @@ The **Settings** modal includes these toggles:
 - **Demo Mode**: connect once, then try multiple products without re-running Link every time.
 - **Embedded Link**: runs Link using the embedded Link experience.
 - **Include phone_number in Link Token Create config**: adds `user.phone_number` (E.164) to Link token configs.
-- **Layer**: placeholder (currently disabled in UI).
+- **Layer**: enables Plaid Layer flows (uses `/user/create` + `/session/token/create` and Layer `submit()` steps before Link opens). Requires a webhook URL.
 - **Use legacy user_token**: Switches between modern `user_id`/`identity` and legacy `user_token`/`consumer_report_user_identity` for `/user/create` calls
 - **Use ALT_PLAID_CLIENT_ID**: uses `ALT_PLAID_CLIENT_ID` + `ALT_PLAID_SECRET` for the session.
 - **Bypass Link**: uses Sandbox endpoints to create items without Link UI and go straight to downstream calls.

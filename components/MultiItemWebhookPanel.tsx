@@ -17,6 +17,8 @@ interface MultiItemWebhookPanelProps {
   onForward: (publicTokens: string[]) => void;
   title?: string;
   allowForwardWithoutTokens?: boolean;
+  mode?: 'link' | 'check_report';
+  expectedUserId?: string | null;
 }
 
 function formatTimestamp(timestamp?: string) {
@@ -37,12 +39,26 @@ export default function MultiItemWebhookPanel({
   onForward,
   title = 'Webhooks',
   allowForwardWithoutTokens = false,
+  mode = 'link',
+  expectedUserId = null,
 }: MultiItemWebhookPanelProps) {
   const relevantWebhooks = useMemo(() => {
     if (!enabled) return [];
     return (webhooks || []).filter((w) => {
       const webhookType = w.webhook_type ?? w.payload?.webhook_type;
       const webhookCode = w.webhook_code ?? w.payload?.webhook_code;
+
+      if (mode === 'check_report') {
+        if (webhookType !== 'CHECK_REPORT') return false;
+        if (webhookCode !== 'USER_CHECK_REPORT_READY' && webhookCode !== 'USER_CHECK_REPORT_FAILED') return false;
+        if (expectedUserId) {
+          const payloadUserId = w.payload?.user_id ?? w.payload?.user?.user_id ?? (w as any)?.user_id;
+          if (payloadUserId && payloadUserId !== expectedUserId) return false;
+        }
+        return true;
+      }
+
+      // Default: Link webhooks for hosted link / multi-item
       if (webhookType !== 'LINK') return false;
       if (webhookCode !== 'ITEM_ADD_RESULT' && webhookCode !== 'SESSION_FINISHED') return false;
 
@@ -52,13 +68,27 @@ export default function MultiItemWebhookPanel({
       }
       return true;
     });
-  }, [enabled, webhooks, linkToken]);
+  }, [enabled, webhooks, linkToken, mode, expectedUserId]);
 
   const sessionFinished = useMemo(() => {
+    if (mode !== 'link') return undefined;
     return relevantWebhooks.find((w) => (w.webhook_code ?? w.payload?.webhook_code) === 'SESSION_FINISHED');
   }, [relevantWebhooks]);
 
   const forwardState = useMemo(() => {
+    if (mode === 'check_report') {
+      const failed = relevantWebhooks.find(
+        (w) => (w.webhook_code ?? w.payload?.webhook_code) === 'USER_CHECK_REPORT_FAILED'
+      );
+      const ready = relevantWebhooks.find(
+        (w) => (w.webhook_code ?? w.payload?.webhook_code) === 'USER_CHECK_REPORT_READY'
+      );
+
+      if (ready) return { canForward: true, publicTokens: [] as string[] };
+      if (failed) return { canForward: false, reason: 'Report failed', publicTokens: [] as string[] };
+      return { canForward: false, reason: 'Waiting for report ready', publicTokens: [] as string[] };
+    }
+
     const status = sessionFinished?.payload?.status;
     const publicTokens: unknown = sessionFinished?.payload?.public_tokens;
     const normalizedStatus = typeof status === 'string' ? status.trim().toUpperCase() : undefined;
@@ -84,7 +114,7 @@ export default function MultiItemWebhookPanel({
     }
 
     return { canForward: true, reason: '', publicTokens: publicTokens as string[] };
-  }, [linkToken, sessionFinished]);
+  }, [linkToken, sessionFinished, allowForwardWithoutTokens, mode, relevantWebhooks]);
 
   if (!enabled) return null;
 
@@ -124,7 +154,7 @@ export default function MultiItemWebhookPanel({
         ) : (
           <div className="webhook-placeholder">
             <pre className="code-block">
-              <code>... waiting for Link webhooks</code>
+              <code>{mode === 'check_report' ? '... waiting for Check webhooks' : '... waiting for Link webhooks'}</code>
             </pre>
           </div>
         )}

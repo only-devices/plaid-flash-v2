@@ -1614,6 +1614,15 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   border-radius: 24px !important;
 }
 
+/* When the bottom webhook panel is visible during an active Link session,
+   shift the Link iframe up and shorten it to avoid overlap. */
+body:has(.webhook-panel-container):has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
+  top: 37% !important;
+  height: 100% !important;
+  max-height: 700px !important;
+  transform: translate(calc(-100% - 40px), -50%) !important;
+}
+
 @media (max-width: 1400px) {
   .event-logs-container {
     width: 420px;
@@ -2550,7 +2559,16 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 /* When webhook panel is visible, shift top panels up */
 body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
   top: 32%;
-  transform: translate(calc(-50% - 40px), -50%);
+  transform: translate(calc(-50% - 40px), -60%);
+  height: 540px;
+  min-height: 340px;
+  max-height: 540px;
+}
+
+/* When webhook panel is visible during an active Link session (iframe present),
+   also shift the RIGHT-side onEvent panel up so it doesn't overlap the webhook panel. */
+body:has(.webhook-panel-container):has(iframe[id^="plaid-link-iframe"]) .event-logs-container.event-logs-right {
+  top: 32%;
   height: 540px;
   min-height: 340px;
   max-height: 540px;
@@ -2559,9 +2577,9 @@ body:has(.webhook-panel-container) .event-logs-container.event-logs-left {
 body:has(.webhook-panel-container) .callback-modal-container {
   top: 32%;
   transform: translate(calc(50% + 40px), -50%);
-  height: 540px;
+  height: 648px;
   min-height: 340px;
-  max-height: 540px;
+  max-height: 648px;
 }
 
 body:has(.webhook-panel-container) .callback-modal-container > div {
@@ -2571,15 +2589,16 @@ body:has(.webhook-panel-container) .callback-modal-container > div {
 
 body:has(.webhook-panel-container) .event-logs-modal {
   height: 100%;
-  min-height: unset;
+  height: unset;
 }
 
 body:has(.webhook-panel-container) .callback-modal-container .account-data {
-  max-height: 330px;
+  height: 100%;
+  max-height: 530px;
 }
 
 body:has(.webhook-panel-container) .event-logs-scroll {
-  max-height: 350px;
+  max-height: 530px;
 }
 
 /* Webhook panel - width matches both top panels + gap */
@@ -2594,6 +2613,17 @@ body:has(.webhook-panel-container) .event-logs-scroll {
   z-index: 999;
   opacity: 0;
   animation: slideUp 0.5s ease-out forwards;
+}
+
+/* During an active Link session, dock the webhook panel lower and slightly shorter
+   so it doesn't cover the Link iframe content. */
+body:has(.webhook-panel-container):has(iframe[id^="plaid-link-iframe"]) .webhook-panel-container {
+  top: 82%;
+}
+
+body:has(.webhook-panel-container):has(iframe[id^="plaid-link-iframe"]) .webhook-panel {
+  height: 320px;
+  max-height: 320px;
 }
 
 /* Embedded Webhook Panel (inside modal) */
