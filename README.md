@@ -127,16 +127,16 @@ Product definitions live in `lib/productConfig.ts`. Leaf products below include 
 
 ## Settings toggles (feature flags)
 
-The **Advanced Settings** modal includes these toggles:
+The **Settings** modal includes these toggles:
 
 - **⚡️ Mode**: streamlined mode that skips some intermediate screens and runs faster through flows.
 - **Demo Mode**: connect once, then try multiple products without re-running Link every time.
-- **Embedded Link Mode**: runs Link using the embedded Link experience.
+- **Embedded Link**: runs Link using the embedded Link experience.
 - **Include phone_number in Link Token Create config**: adds `user.phone_number` (E.164) to Link token configs.
 - **Layer**: placeholder (currently disabled in UI).
 - **Use legacy user_token**: Switches between modern `user_id`/`identity` and legacy `user_token`/`consumer_report_user_identity` for `/user/create` calls
 - **Use ALT_PLAID_CLIENT_ID**: uses `ALT_PLAID_CLIENT_ID` + `ALT_PLAID_SECRET` for the session.
-- **Bypass Link (Sandbox Only)**: uses Sandbox endpoints to create items without Link UI and go straight to downstream calls.
+- **Bypass Link**: uses Sandbox endpoints to create items without Link UI and go straight to downstream calls.
 - **Multi-item Link**: enables `enable_multi_item_link: true`. Non-CRA flows use Plaid webhooks to capture `public_tokens[]` and includes an Item picker when multiple Items are added.
 - **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received.
 - **Remove items and users automatically** (default on): when you finish and return to the menu, automatically calls `/item/remove` (non-CRA) or `/user/remove` (CRA/hybrid). When off, deletion is skipped.

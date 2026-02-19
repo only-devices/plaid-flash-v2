@@ -106,6 +106,7 @@ export default function Home() {
   
   // Settings/Configuration state
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'flash' | 'link' | 'advanced'>('flash');
   const [zapMode, setZapMode] = useState(false);
   const [embeddedMode, setEmbeddedMode] = useState(false);
   const [layerMode, setLayerMode] = useState(false);
@@ -1593,6 +1594,7 @@ export default function Home() {
   // Settings Modal Handlers
   const handleOpenSettings = () => {
     // Copy current settings to temp state
+    setSettingsTab('flash');
     setTempZapMode(zapMode);
     setTempEmbeddedMode(embeddedMode);
     setTempLayerMode(layerMode);
@@ -4076,7 +4078,7 @@ export default function Home() {
     if (!effectiveWebhookConfigUrl) {
       setErrorData({
         error: 'WEBHOOK_URL_REQUIRED',
-        message: 'Configure a webhook URL in Advanced Settings before subscribing to Cashflow Updates.',
+        message: 'Configure a webhook URL in Settings before subscribing to Cashflow Updates.',
       });
       setApiStatusCode(400);
       setModalState('api-error');
@@ -5296,104 +5298,150 @@ export default function Home() {
               <path d="M12 17h.01" />
             </svg>
           </a>
-          <div className="settings-header">
-            <h2>Advanced Settings</h2>
-          </div>
-          <div className="settings-grid">
-            <SettingsToggle 
-              label="⚡️ Mode" 
-              checked={tempZapMode} 
-              onChange={handleToggleZap} 
-              disabled={tempDemoMode} 
-            />
-            <SettingsToggle 
-              label="Demo Mode" 
-              checked={tempDemoMode} 
-              onChange={handleToggleDemo} 
-              disabled={tempZapMode}
-            />
-            <SettingsToggle 
-              label="Embedded Link Mode" 
-              checked={tempEmbeddedMode} 
-              onChange={handleToggleEmbedded} 
-              disabled={false}
-            />
-            <SettingsToggle 
-              label="Include phone_number in Link Token Create config" 
-              checked={tempIncludePhoneNumber} 
-              onChange={handleToggleIncludePhoneNumber} 
-              disabled={false}
-            />
-            <SettingsToggle 
-              label="Layer" 
-              checked={tempLayerMode} 
-              onChange={handleToggleLayer} 
-              disabled={true}
-              tooltip="Not quite yet"
-            />
-            <SettingsToggle 
-              label="Use legacy user_token" 
-              checked={tempUseLegacyUserToken} 
-              onChange={handleToggleLegacyUserToken}
-              disabled={false}
-            />
-            <SettingsToggle 
-              label="Use ALT_PLAID_CLIENT_ID" 
-              checked={tempUseAltCredentials} 
-              onChange={handleToggleAltCredentials}
-              disabled={!altCredentialsAvailable}
-            />
-            <SettingsToggle 
-              label="Bypass Link (Sandbox Only)" 
-              checked={tempBypassLink} 
-              onChange={handleToggleBypassLink}
-              disabled={false}
-            />
-            <SettingsToggle
-              label="Multi-item Link"
-              checked={tempMultiItemLinkEnabled}
-              onChange={handleToggleMultiItemLink}
-              disabled={!effectiveWebhookConfigUrlForSettings || tempBypassLink}
-              tooltip={
-                tempBypassLink
-                  ? 'Disable Bypass Link to use Multi-item Link'
-                  : !effectiveWebhookConfigUrlForSettings
-                    ? (IS_DEV
-                        ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
-                        : 'Set your webhook URL below to enable Multi-item Link')
-                    : undefined
-              }
-            />
-            <SettingsToggle
-              label="Hosted Link"
-              checked={tempHostedLinkEnabled}
-              onChange={handleToggleHostedLink}
-              disabled={!effectiveWebhookConfigUrlForSettings}
-              tooltip={!effectiveWebhookConfigUrlForSettings ? 'Set your webhook URL below to enable Hosted Link' : undefined}
-            />
-            <SettingsToggle
-              label="Remove items and users automatically"
-              checked={tempAutoRemoveEnabled}
-              onChange={handleToggleAutoRemove}
-              disabled={false}
-            />
-            <div className="settings-info-row">
-              <span className="settings-info-label">Webhook URL</span>
-              <span className="settings-info-value">
-                {IS_DEV ? (
-                  webhookUrl ? webhookUrl : 'Not active'
-                ) : (
-                  <input
-                    className="settings-webhook-url-input"
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://your-public-webhook-url"
-                    value={tempWebhookUrlOverride}
-                    onChange={(e) => setTempWebhookUrlOverride(e.target.value)}
-                  />
-                )}
-              </span>
+          <div className="settings-scroll-area">
+            <div className="settings-header">
+              <h2>Settings</h2>
             </div>
+            <div className="settings-tabs" role="tablist" aria-label="Settings tabs">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'flash'}
+                className={`settings-tab ${settingsTab === 'flash' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('flash')}
+              >
+                Flash
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'link'}
+                className={`settings-tab ${settingsTab === 'link' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('link')}
+              >
+                Link
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'advanced'}
+                className={`settings-tab ${settingsTab === 'advanced' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('advanced')}
+              >
+                Advanced
+              </button>
+            </div>
+            <div className="settings-grid">
+              {settingsTab === 'flash' && (
+                <>
+                  <SettingsToggle
+                    label="Demo Mode"
+                    checked={tempDemoMode}
+                    onChange={handleToggleDemo}
+                    disabled={tempZapMode}
+                  />
+                  <SettingsToggle
+                    label="⚡️ Mode"
+                    checked={tempZapMode}
+                    onChange={handleToggleZap}
+                    disabled={tempDemoMode}
+                  />
+                  <SettingsToggle
+                    label="Layer"
+                    checked={tempLayerMode}
+                    onChange={handleToggleLayer}
+                    disabled={true}
+                    tooltip="Not quite yet"
+                  />
+                </>
+              )}
+
+              {settingsTab === 'link' && (
+                <>
+                  <SettingsToggle
+                    label="Embedded Link"
+                    checked={tempEmbeddedMode}
+                    onChange={handleToggleEmbedded}
+                    disabled={false}
+                  />
+                  <SettingsToggle
+                    label="Hosted Link"
+                    checked={tempHostedLinkEnabled}
+                    onChange={handleToggleHostedLink}
+                    disabled={!effectiveWebhookConfigUrlForSettings}
+                    tooltip={!effectiveWebhookConfigUrlForSettings ? 'Set your webhook URL below to enable Hosted Link' : undefined}
+                  />
+                  <SettingsToggle
+                    label="Multi-item Link"
+                    checked={tempMultiItemLinkEnabled}
+                    onChange={handleToggleMultiItemLink}
+                    disabled={!effectiveWebhookConfigUrlForSettings || tempBypassLink}
+                    tooltip={
+                      tempBypassLink
+                        ? 'Disable Bypass Link to use Multi-item Link'
+                        : !effectiveWebhookConfigUrlForSettings
+                          ? (IS_DEV
+                              ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
+                              : 'Set your webhook URL below to enable Multi-item Link')
+                          : undefined
+                    }
+                  />
+                  <SettingsToggle
+                    label="Bypass Link"
+                    checked={tempBypassLink}
+                    onChange={handleToggleBypassLink}
+                    disabled={false}
+                  />
+                  <SettingsToggle
+                    label="Include phone_number in Link Token Create config"
+                    checked={tempIncludePhoneNumber}
+                    onChange={handleToggleIncludePhoneNumber}
+                    disabled={false}
+                  />
+                </>
+              )}
+
+              {settingsTab === 'advanced' && (
+                <>
+                  <SettingsToggle
+                    label="Use ALT_PLAID_CLIENT_ID"
+                    checked={tempUseAltCredentials}
+                    onChange={handleToggleAltCredentials}
+                    disabled={!altCredentialsAvailable}
+                  />
+                  <SettingsToggle
+                    label="Use legacy user_token"
+                    checked={tempUseLegacyUserToken}
+                    onChange={handleToggleLegacyUserToken}
+                    disabled={false}
+                  />
+                  <SettingsToggle
+                    label="Remove items and users automatically"
+                    checked={tempAutoRemoveEnabled}
+                    onChange={handleToggleAutoRemove}
+                    disabled={false}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="settings-info-row">
+            <span className="settings-info-label">Webhook URL</span>
+            <span className="settings-info-value">
+              {IS_DEV ? (
+                webhookUrl ? webhookUrl : 'Not active'
+              ) : (
+                <input
+                  className="settings-webhook-url-input"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://your-public-webhook-url"
+                  value={tempWebhookUrlOverride}
+                  onChange={(e) => setTempWebhookUrlOverride(e.target.value)}
+                />
+              )}
+            </span>
           </div>
           <div className="button-row">
             <button className="action-button button-red" onClick={handleCancelSettings}>

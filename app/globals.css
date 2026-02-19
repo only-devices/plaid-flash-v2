@@ -1788,7 +1788,7 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   display: block;
 }
 
-/* Docs button in Advanced Settings modal */
+/* Docs button in Settings modal */
 .settings-docs-button {
   top: 36px; /* place below the top-right close icon */
   right: 36px;
@@ -1831,12 +1831,70 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   max-width: 95%;
   margin: 0 auto;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+  height: min(560px, 60vh);
+}
+
+.settings-scroll-area {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .settings-header {
   text-align: center;
   margin-bottom: 32px;
   animation: slideDown 0.5s ease-out;
+}
+
+.settings-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  margin: 0 auto 18px auto;
+  padding: 0 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 2px 12px 2px;
+  position: relative;
+  cursor: pointer;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.settings-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.settings-tab.active {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.settings-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(45, 155, 159, 0.95);
+}
+
+.settings-tab:focus-visible {
+  outline: 2px solid rgba(136, 192, 208, 0.9);
+  outline-offset: 3px;
+  border-radius: 10px;
 }
 
 /* Demo Products Modal */
@@ -2151,6 +2209,11 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
 
   .settings-modal {
     padding: 16px;
+    height: min(560px, 60vh);
+  }
+
+  .settings-scroll-area {
+    padding-right: 4px;
   }
 
   .settings-header h2 {
