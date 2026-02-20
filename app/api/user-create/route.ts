@@ -1,27 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPlaidKeys } from '@/lib/server/plaidCredentials';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { useLegacyUserToken, useAltCredentials, ...userCreateParams } = body;
-
-    console.log('[User Create] useAltCredentials flag:', useAltCredentials);
-    console.log('[User Create] ALT_PLAID_CLIENT_ID exists:', !!process.env.ALT_PLAID_CLIENT_ID);
+    const { useLegacyUserToken, ...userCreateParams } = body;
 
     // The request body should contain either:
     // - identity (for new user_id flow)
     // - consumer_report_user_identity (for legacy user_token flow)
     // Plus client_user_id which is always required
 
-    // Select credentials based on flag
-    const clientId = useAltCredentials && process.env.ALT_PLAID_CLIENT_ID 
-      ? process.env.ALT_PLAID_CLIENT_ID 
-      : process.env.PLAID_CLIENT_ID;
-    const secret = useAltCredentials && process.env.ALT_PLAID_SECRET 
-      ? process.env.ALT_PLAID_SECRET 
-      : process.env.PLAID_SECRET;
-
-    console.log('[User Create] Selected client ID:', clientId?.substring(0, 8) + '...');
+    const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody = {
       client_id: clientId,

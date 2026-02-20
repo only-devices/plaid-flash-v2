@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPlaidKeys } from '@/lib/server/plaidCredentials';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, identity, useAltCredentials } = body || {};
+    const { user_id, identity } = body || {};
 
     if (!user_id || typeof user_id !== 'string') {
       return NextResponse.json(
@@ -19,13 +20,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Select credentials based on flag
-    const clientId =
-      useAltCredentials && process.env.ALT_PLAID_CLIENT_ID
-        ? process.env.ALT_PLAID_CLIENT_ID
-        : process.env.PLAID_CLIENT_ID;
-    const secret =
-      useAltCredentials && process.env.ALT_PLAID_SECRET ? process.env.ALT_PLAID_SECRET : process.env.PLAID_SECRET;
+    const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody = {
       client_id: clientId,

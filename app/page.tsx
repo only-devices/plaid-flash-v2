@@ -58,6 +58,7 @@ export default function Home() {
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
   const [modalState, setModalState] = useState<
@@ -141,7 +142,6 @@ export default function Home() {
   const [useAltCredentials, setUseAltCredentials] = useState(false);
   const [tempUseAltCredentials, setTempUseAltCredentials] = useState(false);
   const [altCredentialsAvailable, setAltCredentialsAvailable] = useState(false);
-  const [usedAltCredentials, setUsedAltCredentials] = useState<boolean>(false); // Track which credentials were used for this session
   const [includePhoneNumber, setIncludePhoneNumber] = useState(true);
   const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
   const [bypassLink, setBypassLink] = useState(false);
@@ -154,6 +154,7 @@ export default function Home() {
   const [showDemoProductsModal, setShowDemoProductsModal] = useState(false);
   const [demoProductsVisibility, setDemoProductsVisibility] = useState<Record<string, boolean>>({});
   const [isDemoModeStarting, setIsDemoModeStarting] = useState(false);
+  const [demoPendingLinkTokenConfig, setDemoPendingLinkTokenConfig] = useState<any>(null);
 
   // CRA Mode state
   const [userCreateConfig, setUserCreateConfig] = useState<any>(null);
@@ -171,7 +172,6 @@ export default function Home() {
   const [userUpdateConfigError, setUserUpdateConfigError] = useState<string | null>(null);
   const [craLayerPendingAfterUserUpdate, setCraLayerPendingAfterUserUpdate] = useState<null | {
     userId: string;
-    credsFlag: boolean;
     webhook: string;
     productsToCreate: string[];
   }>(null);
@@ -199,6 +199,10 @@ export default function Home() {
   useEffect(() => {
     webhookUrlRef.current = webhookUrl;
   }, [webhookUrl]);
+
+  useEffect(() => {
+    accessTokenRef.current = accessToken;
+  }, [accessToken]);
 
   // Hybrid CRA + non-CRA flow state (CRA product selected but Link config includes non-CRA products)
   const [hybridModeActive, setHybridModeActive] = useState(false);
@@ -268,6 +272,12 @@ export default function Home() {
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
   const effectiveWebhookConfigUrl = IS_DEV ? webhookUrl : (webhookUrlOverride.trim() || null);
   const effectiveWebhookConfigUrlForSettings = IS_DEV ? webhookUrl : (tempWebhookUrlOverride.trim() || null);
+
+  // Some callbacks (e.g. Link's onSuccess/onExit) may be registered once; keep selected product in a ref.
+  const effectiveProductIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    effectiveProductIdRef.current = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+  }, [selectedProduct, selectedChildProduct, selectedGrandchildProduct]);
   const hasCustomSettings =
     zapMode ||
     embeddedMode ||
@@ -441,13 +451,14 @@ export default function Home() {
     let eventSource: EventSource | null = null;
 
     const initWebhooks = async () => {
-      // Check if alternative credentials are available
+      // Load credential mode (cookie-backed) + availability
       try {
-        const response = await fetch('/api/alt-credentials-check');
+        const response = await fetch('/api/credentials-mode');
         const data = await response.json();
-        setAltCredentialsAvailable(!!data.available);
+        setAltCredentialsAvailable(!!data.altAvailable);
+        setUseAltCredentials(!!data.useAltCredentials);
       } catch (error) {
-        console.error('Error checking alt credentials:', error);
+        console.error('Error loading credential mode:', error);
       }
 
       // Only initialize webhook URL + SSE stream when feature is enabled (dev)
@@ -543,7 +554,6 @@ export default function Home() {
       if (!productConfig) {
         throw new Error('Product configuration not found');
       }
-      
       const requestBody: any = {
         products: productConfig.products,
         required_if_supported_products: productConfig.required_if_supported
@@ -553,9 +563,6 @@ export default function Home() {
       if (productConfig.additionalLinkParams) {
         Object.assign(requestBody, productConfig.additionalLinkParams);
       }
-
-      // Add useAltCredentials flag
-      requestBody.useAltCredentials = usedAltCredentials || useAltCredentials;
 
       const response = await fetch('/api/create-link-token', {
         method: 'POST',
@@ -751,7 +758,6 @@ export default function Home() {
             webhook: effectiveWebhookConfigUrl,
             user: { client_user_id },
             user_id,
-            useAltCredentials: usedAltCredentials || useAltCredentials,
           }),
         });
 
@@ -793,7 +799,7 @@ export default function Home() {
         setShowWelcome(false);
       }
     },
-    [effectiveWebhookConfigUrl, usedAltCredentials, useAltCredentials, webhookUrl]
+    [effectiveWebhookConfigUrl, useAltCredentials, webhookUrl]
   );
 
   const runNonCraFlowWithAccessToken = useCallback(
@@ -825,7 +831,7 @@ export default function Home() {
         }
 
         const requestBody = buildProductRequestBody(
-          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+          { access_token },
           productConfig
         );
 
@@ -858,7 +864,7 @@ export default function Home() {
       const accountsResponse = await fetch('/api/accounts-get', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ access_token }),
       });
 
       const accountsJson = await accountsResponse.json();
@@ -875,14 +881,7 @@ export default function Home() {
       setModalState('accounts-data');
       setShowModal(true);
     },
-    [
-      demoMode,
-      selectedGrandchildProduct,
-      selectedChildProduct,
-      selectedProduct,
-      usedAltCredentials,
-      useAltCredentials,
-    ]
+    [demoMode, selectedGrandchildProduct, selectedChildProduct, selectedProduct]
   );
 
   const showLinkConfigPreview = (productId: string) => {
@@ -1111,7 +1110,7 @@ export default function Home() {
     try {
       const configToUse = configOverride || userCreateConfig;
       
-      console.log('[Frontend] Creating user with useAltCredentials:', useAltCredentials);
+      console.log('[Frontend] Creating user');
 
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
@@ -1127,12 +1126,10 @@ export default function Home() {
             ? {
                 // Non-CRA Multi-item: only client_user_id is required
                 client_user_id: configToUse?.client_user_id || 'multi_item_user_' + Date.now(),
-                useAltCredentials,
               }
             : {
                 ...configToUse,
                 useLegacyUserToken,
-                useAltCredentials,
               }
         ),
       });
@@ -1146,9 +1143,6 @@ export default function Home() {
         setModalState('api-error');
         return;
       }
-      
-      // Remember which credentials were used for this session
-      setUsedAltCredentials(useAltCredentials);
       
       // Store the user_id or user_token from the response
       const newUserId = data.user_id || null;
@@ -1169,6 +1163,29 @@ export default function Home() {
         // New mode: only store user_id
         setUserId(newUserId);
         setUserToken(null);
+      }
+
+      // Demo Mode CRA bootstrap: after /user/create, resume pending /link/token/create preview
+      if (demoMode && isDemoModeStarting && demoPendingLinkTokenConfig) {
+        const pendingCfg: any = { ...demoPendingLinkTokenConfig };
+
+        // Add user_id or user_token based on legacy toggle (same as normal CRA flow)
+        if (useLegacyUserToken && newUserToken) {
+          pendingCfg.user_token = newUserToken;
+          setUsedUserToken(true);
+        } else if (newUserId) {
+          pendingCfg.user_id = newUserId;
+          setUsedUserToken(false);
+        } else if (newUserToken) {
+          pendingCfg.user_token = newUserToken;
+          setUsedUserToken(true);
+        }
+
+        setDemoPendingLinkTokenConfig(null);
+        setLinkTokenConfig(pendingCfg);
+        setModalState('preview-config');
+        setShowModal(true);
+        return;
       }
 
       // Layer legacy mode: continue into /session/token/create by passing user_token under user.user_id
@@ -1405,6 +1422,22 @@ export default function Home() {
     return null;
   };
 
+  const validateLinkTokenCreateConfig = (cfg: any): string | null => {
+    if (!cfg || typeof cfg !== 'object') return 'Invalid JSON: configuration must be an object';
+    const isUserBasedUpdate = (typeof cfg.user_id === 'string' && cfg.user_id.trim().length > 0) || (typeof cfg.user_token === 'string' && cfg.user_token.trim().length > 0);
+    if (!isUserBasedUpdate) return null;
+
+    const user = (cfg as any).user;
+    if (!user || typeof user !== 'object' || Array.isArray(user)) {
+      return 'Update Mode (user_id/user_token) requires a user object with user.client_user_id.';
+    }
+    const clientUserId = typeof (user as any).client_user_id === 'string' ? (user as any).client_user_id.trim() : '';
+    if (!clientUserId) {
+      return 'Update Mode (user_id/user_token) requires user.client_user_id. Please set it in the /link/token/create config.';
+    }
+    return null;
+  };
+
   function sanitizeUserUpdateConfigForDisplay(config: any) {
     if (!config || typeof config !== 'object') return config;
     const copy: any = { ...config };
@@ -1458,7 +1491,6 @@ export default function Home() {
         body: JSON.stringify({
           user_id: pending.userId,
           identity: configToUse.identity,
-          useAltCredentials: pending.credsFlag,
         }),
       });
       const userUpdateJson = await userUpdateResp.json();
@@ -1481,7 +1513,6 @@ export default function Home() {
           days_requested: 365,
           consumer_report_permissible_purpose: 'LEGITIMATE_BUSINESS_NEED_OTHER',
           products: pending.productsToCreate,
-          useAltCredentials: pending.credsFlag,
         }),
       });
       const createJson = await createResp.json();
@@ -1628,6 +1659,17 @@ export default function Home() {
   const handleProceedWithConfig = async (configOverride?: any) => {
     // User approved the config, now fetch the link token using the (potentially edited) linkTokenConfig
     // In Zap Mode, configOverride is passed directly to avoid state timing issues
+    const configToUse = configOverride || linkTokenConfig;
+    const validationError = validateLinkTokenCreateConfig(configToUse);
+    if (validationError) {
+      setConfigError(validationError);
+      setEditedConfig(JSON.stringify(configToUse, null, 2));
+      setIsEditingConfig(true);
+      setModalState('preview-config');
+      setShowModal(true);
+      return;
+    }
+
     setShowModal(false);
     
     // If we're starting Demo Mode, trigger the UI changes now
@@ -1669,14 +1711,12 @@ export default function Home() {
         setShowModal(true);
       }
 
-      // Use the configOverride if provided (Zap Mode), otherwise use linkTokenConfig state
-      const configToUse = configOverride || linkTokenConfig;
       const response = await fetch('/api/create-link-token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...configToUse, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ ...configToUse }),
       });
       
       const data = await response.json();
@@ -1815,6 +1855,12 @@ export default function Home() {
     try {
       // Validate JSON first
       const parsed = JSON.parse(editedConfig);
+
+      const validationError = validateLinkTokenCreateConfig(parsed);
+      if (validationError) {
+        setConfigError(validationError);
+        return;
+      }
       
       // Close modal immediately to avoid showing read-only view
       setShowModal(false);
@@ -1888,7 +1934,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ ...parsed, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ ...parsed }),
         });
         
         const data = await response.json();
@@ -2080,12 +2126,21 @@ export default function Home() {
           throw new Error('Product API endpoint not configured');
         }
         
+        // Harden edited configs: re-inject internal flags + access_token if missing
+        const tokenToUse = accessTokenRef.current || accessToken;
+        const bodyToSend: any = { ...parsed };
+        // Internal-only: always force the current session access_token for non-CRA.
+        if (!productConfig.isCRA) {
+          if (!tokenToUse) throw new Error('Missing access_token for product API call');
+          bodyToSend.access_token = tokenToUse;
+        }
+
         const productResponse = await fetch(productConfig.apiEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(parsed),
+          body: JSON.stringify(bodyToSend),
         });
 
         const productData = await productResponse.json();
@@ -2138,13 +2193,20 @@ export default function Home() {
 
       // Use the configOverride if provided, otherwise use productApiConfig state
       const configToUse = configOverride || productApiConfig;
+      const tokenToUse = accessTokenRef.current || accessToken;
+      const bodyToSend: any = { ...(configToUse || {}) };
+      // Internal-only: always force the current session access_token for non-CRA.
+      if (!productConfig.isCRA) {
+        if (!tokenToUse) throw new Error('Missing access_token for product API call');
+        bodyToSend.access_token = tokenToUse;
+      }
       
       const productResponse = await fetch(productConfig.apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(configToUse),
+        body: JSON.stringify(bodyToSend),
       });
 
       const productData = await productResponse.json();
@@ -2233,7 +2295,7 @@ export default function Home() {
     }
   };
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
     // Commit temp state to main state
     const wasDemoMode = demoMode;
     const willBeDemoMode = tempDemoMode;
@@ -2247,7 +2309,24 @@ export default function Home() {
     setHostedLinkEnabled(tempHostedLinkEnabled);
     setAutoRemoveEnabled(tempAutoRemoveEnabled);
     setUseLegacyUserToken(tempUseLegacyUserToken);
-    setUseAltCredentials(tempUseAltCredentials);
+    // Persist Plaid credential mode (cookie-backed)
+    try {
+      const resp = await fetch('/api/credentials-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useAltCredentials: tempUseAltCredentials }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        setAltCredentialsAvailable(!!json.altAvailable);
+        setUseAltCredentials(!!json.useAltCredentials);
+      } else {
+        // Fall back to optimistic UI state if the API errors
+        setUseAltCredentials(tempUseAltCredentials);
+      }
+    } catch {
+      setUseAltCredentials(tempUseAltCredentials);
+    }
     setIncludePhoneNumber(tempIncludePhoneNumber);
     setBypassLink(tempBypassLink);
 
@@ -2455,7 +2534,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ public_token }),
       });
       
       if (!exchangeResponse.ok) {
@@ -2484,7 +2563,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+          body: JSON.stringify({ access_token }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -2512,7 +2591,7 @@ export default function Home() {
       // Build request body with access token and any additional params
       // Pass accountsData only if it was fetched (not for Signal Balance)
       const requestBody = buildProductRequestBody(
-        { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+        { access_token },
         productConfig,
         skipAccountsGet ? undefined : accountsData
       );
@@ -2566,7 +2645,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...configToUse, useAltCredentials: usedAltCredentials || useAltCredentials }),
+      body: JSON.stringify({ ...configToUse }),
       });
       
       const data = await response.json();
@@ -2616,9 +2695,7 @@ export default function Home() {
           // CRA Cashflow Updates (Monitoring Insights): even in Bypass Link mode, we must run the
           // items -> subscribe -> webhook -> get sequence (not jump straight to /get).
           if (effectiveProductId === 'cra-cashflow-updates') {
-            const credsFlag = usedAltCredentials || useAltCredentials;
-
-            const baseParams: any = { useAltCredentials: credsFlag };
+            const baseParams: any = {};
             if (usedUserToken && userToken) {
               baseParams.user_token = userToken;
             } else if (userId) {
@@ -2693,9 +2770,7 @@ export default function Home() {
           }
 
           // Build request body with user_id or user_token
-          const baseParams: any = {
-            useAltCredentials: usedAltCredentials || useAltCredentials
-          };
+          const baseParams: any = {};
           if (usedUserToken && userToken) {
             baseParams.user_token = userToken;
           } else if (userId) {
@@ -2737,7 +2812,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ public_token }),
       });
       
       if (!exchangeResponse.ok) {
@@ -2761,7 +2836,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+          body: JSON.stringify({ access_token }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -2787,7 +2862,7 @@ export default function Home() {
 
         // Build request body with access token and any additional params
         const requestBody = buildProductRequestBody(
-          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
+          { access_token },
           productConfig
         );
         
@@ -2824,7 +2899,7 @@ export default function Home() {
     // Hide the button
     setShowButton(false);
     
-    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const effectiveProductId = effectiveProductIdRef.current;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const isUpdateMode = effectiveProductId === 'link-update-mode';
 
@@ -2857,7 +2932,7 @@ export default function Home() {
         public_token,
         metadata,
       });
-      if (WEBHOOKS_ENABLED && webhookUrl) {
+      if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
         setShowWebhookPanel(true);
       }
       return;
@@ -2875,13 +2950,12 @@ export default function Home() {
         public_token,
         metadata
       });
-      // Show webhook panel only for products that require webhooks (CRA products)
-      // When multi-item is enabled for CRA products, keep CRA flow but do NOT show the webhook modal.
-      if (WEBHOOKS_ENABLED && webhookUrl && productConfig?.requiresWebhook) {
+      // Show webhook panel whenever webhooks are configured (dev).
+      if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
         setShowWebhookPanel(true);
       }
     }
-  }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess, selectedChildProduct, selectedProduct, selectedGrandchildProduct, webhookUrl]);
+  }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess]);
 
   const handleProceedWithSuccess = async () => {
     // Start fade-out animation for both modals
@@ -2896,6 +2970,51 @@ export default function Home() {
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
     setShowWebhookPanel(false);
+
+    // Demo Mode bootstrap: no single product is selected yet; always exchange public_token and return to the demo menu.
+    if (demoMode && !demoLinkCompleted) {
+      try {
+        const public_token = typeof callbackData?.public_token === 'string' ? callbackData.public_token : '';
+        if (!public_token) {
+          throw new Error('Missing public_token for token exchange');
+        }
+
+        setModalState('processing-accounts');
+        setShowModal(true);
+
+        const exchangeResponse = await fetch('/api/exchange-public-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_token }),
+        });
+        const exchangeJson = await exchangeResponse.json();
+        if (!exchangeResponse.ok) {
+          setErrorData(exchangeJson);
+          setApiStatusCode(exchangeResponse.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        const access_token: string = exchangeJson.access_token;
+        accessTokenRef.current = access_token;
+        setAccessToken(access_token);
+        setDemoAccessToken(access_token);
+        setDemoLinkCompleted(true);
+        setShowModal(false);
+        setShowProductModal(true);
+        return;
+      } catch (e: any) {
+        setErrorData({
+          error: 'DEMO_MODE_EXCHANGE_FAILED',
+          message: e?.message || 'Failed to exchange public_token in Demo Mode.',
+        });
+        setApiStatusCode(500);
+        setModalState('api-error');
+        setShowModal(true);
+        return;
+      }
+    }
 
     // Get the effective product ID to check product type
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
@@ -2927,7 +3046,6 @@ export default function Home() {
             return;
           }
 
-          const credsFlag = usedAltCredentials || useAltCredentials;
           const public_token = callbackPublicToken;
           if (!public_token) {
             throw new Error('Missing public_token for Layer + CRA flow');
@@ -2946,7 +3064,7 @@ export default function Home() {
           const sessionResp = await fetch('/api/user-account-session-get', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ public_token }),
           });
           const sessionJson = await sessionResp.json();
           if (sessionResp.status >= 400) {
@@ -3054,7 +3172,6 @@ export default function Home() {
           setEditedUserUpdateConfig('');
           setCraLayerPendingAfterUserUpdate({
             userId,
-            credsFlag,
             webhook: effectiveWebhookConfigUrl,
             productsToCreate,
           });
@@ -3064,7 +3181,6 @@ export default function Home() {
         }
 
         if (hybridModeActive) {
-          const credsFlag = usedAltCredentials || useAltCredentials;
           const { public_token } = callbackData || {};
 
           if (!public_token) {
@@ -3080,7 +3196,7 @@ export default function Home() {
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ public_token }),
           });
 
           const exchangeJson = await exchangeResponse.json();
@@ -3093,6 +3209,7 @@ export default function Home() {
           }
 
           const access_token: string = exchangeJson.access_token;
+          accessTokenRef.current = access_token;
           setAccessToken(access_token);
 
           const steps = buildHybridQueue(linkTokenConfig);
@@ -3106,9 +3223,7 @@ export default function Home() {
 
         // CRA Cashflow Updates: run the dedicated Monitoring Insights sequence
         if (effectiveProductId === 'cra-cashflow-updates') {
-          const credsFlag = usedAltCredentials || useAltCredentials;
-
-          const baseParams: any = { useAltCredentials: credsFlag };
+          const baseParams: any = {};
           if (usedUserToken && userToken) {
             baseParams.user_token = userToken;
           } else if (userId) {
@@ -3183,9 +3298,7 @@ export default function Home() {
 
         // Build request body with user_id or user_token
         // Use the same parameter that was used for Link Token creation
-        const baseParams: any = {
-          useAltCredentials: usedAltCredentials || useAltCredentials
-        };
+        const baseParams: any = {};
         if (usedUserToken && userToken) {
           baseParams.user_token = userToken;
         } else if (userId) {
@@ -3196,7 +3309,7 @@ export default function Home() {
         
         const requestBody = buildProductRequestBody(baseParams, productConfig);
         
-        // Store the FULL config (with useAltCredentials) for the API call
+        // Store the config for the API call
         setProductApiConfig(requestBody);
         setModalState('preview-product-api');
         setShowModal(true);
@@ -3223,7 +3336,6 @@ export default function Home() {
     // Layer flow (non-CRA): get access_token + identity via /user_account/session/get
     if (layerMode && layerSessionActive) {
       try {
-        const credsFlag = usedAltCredentials || useAltCredentials;
         const { public_token } = callbackData || {};
         if (!public_token) {
           throw new Error('Missing public_token for Layer flow');
@@ -3235,7 +3347,7 @@ export default function Home() {
         const sessionResp = await fetch('/api/user-account-session-get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+          body: JSON.stringify({ public_token }),
         });
         const sessionJson = await sessionResp.json();
         if (sessionResp.status >= 400) {
@@ -3258,7 +3370,7 @@ export default function Home() {
           const exchangeResp = await fetch('/api/exchange-public-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ public_token }),
           });
           const exchangeJson = await exchangeResp.json();
           if (exchangeResp.status >= 400) {
@@ -3316,7 +3428,7 @@ export default function Home() {
           const matchResp = await fetch('/api/identity-match', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ access_token, user: userForMatch, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ access_token, user: userForMatch }),
           });
           const matchJson = await matchResp.json();
           if (matchResp.status >= 400) {
@@ -3358,7 +3470,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ public_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+        body: JSON.stringify({ public_token }),
       });
       
       if (!exchangeResponse.ok) {
@@ -3372,6 +3484,7 @@ export default function Home() {
       const { access_token } = await exchangeResponse.json();
 
       // Store access token for cleanup
+      accessTokenRef.current = access_token;
       setAccessToken(access_token);
 
       // If in Demo Mode, store access token and show product selector
@@ -3396,10 +3509,7 @@ export default function Home() {
         }
 
         // Build request body with access token and any additional params
-        const requestBody = buildProductRequestBody(
-          { access_token, useAltCredentials: usedAltCredentials || useAltCredentials },
-          productConfig
-        );
+        const requestBody = buildProductRequestBody({ access_token }, productConfig);
         
         const productResponse = await fetch(productConfig.apiEndpoint, {
           method: 'POST',
@@ -3429,7 +3539,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token, useAltCredentials: usedAltCredentials || useAltCredentials }),
+          body: JSON.stringify({ access_token }),
         });
 
         const accountsData = await accountsResponse.json();
@@ -3477,9 +3587,17 @@ export default function Home() {
       }
 
       // Build request body with access token, accounts data, and any additional params
-      const requestBody = buildProductRequestBody({ access_token: accessToken, useAltCredentials: usedAltCredentials || useAltCredentials }, productConfig, accountsData);
+      const tokenToUse = accessTokenRef.current || accessToken;
+      if (!tokenToUse) {
+        throw new Error('Missing access_token for product API call');
+      }
+      const requestBody = buildProductRequestBody(
+        { access_token: tokenToUse },
+        productConfig,
+        accountsData
+      );
       
-      // Store the FULL config (with useAltCredentials) for the API call
+      // Store the config for the API call
       setProductApiConfig(requestBody);
       setModalState('preview-product-api');
     } catch (error) {
@@ -3528,6 +3646,51 @@ export default function Home() {
         throw new Error('Product API endpoint not configured');
       }
 
+      // CRA products are user-based and may require waiting for USER_CHECK_REPORT_READY
+      if (productConfig.isCRA) {
+        const expectedUserId = userId || null;
+        const hasReadyWebhook = (webhooks || []).some((w: any) => {
+          const webhookType = w.webhook_type ?? w.payload?.webhook_type;
+          const webhookCode = w.webhook_code ?? w.payload?.webhook_code;
+          if (webhookType !== 'CHECK_REPORT') return false;
+          if (webhookCode !== 'USER_CHECK_REPORT_READY') return false;
+          if (!expectedUserId) return true;
+          const payloadUserId = w.payload?.user_id ?? w.payload?.user?.user_id ?? w.user_id;
+          return !payloadUserId || payloadUserId === expectedUserId;
+        });
+
+        if (!hasReadyWebhook) {
+          // Reuse hosted-waiting (dev: shows MultiItemWebhookPanel in check_report mode; prod: manual paste)
+          setHostedWaitingMode('cra_check_report');
+          setCraCheckReportExpectedUserId(expectedUserId);
+          setCraCheckReportManualReady(false);
+          setHostedLinkUrl(null);
+          setHostedLinkManualPayload('');
+          setHostedLinkManualParseError(null);
+          setHostedLinkExtractedPublicTokens([]);
+          setModalState('hosted-waiting');
+          setShowModal(true);
+          return;
+        }
+
+        const baseParams: any = {};
+        if (usedUserToken && userToken) {
+          baseParams.user_token = userToken;
+        } else if (userId) {
+          baseParams.user_id = userId;
+        } else if (userToken) {
+          baseParams.user_token = userToken;
+        } else {
+          throw new Error('Missing user_id/user_token for CRA product call');
+        }
+
+        const requestBody = buildProductRequestBody(baseParams, productConfig);
+        setProductApiConfig(requestBody);
+        setModalState('preview-product-api');
+        setShowModal(true);
+        return;
+      }
+
       // In Demo Mode, we may need to call /accounts/get first for some products
       // Check if we should skip accounts/get (same logic as normal mode)
       const skipAccountsGet = productId === 'signal-balance';
@@ -3541,7 +3704,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token: demoAccessToken, useAltCredentials: usedAltCredentials || useAltCredentials }),
+          body: JSON.stringify({ access_token: demoAccessToken }),
         });
 
         accountsData = await accountsResponse.json();
@@ -3607,7 +3770,7 @@ export default function Home() {
     // Hide button
     setShowButton(false);
     
-    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+    const effectiveProductId = effectiveProductIdRef.current;
     const isUpdateMode = effectiveProductId === 'link-update-mode';
 
     // Link-only: Update Mode should always show the standard callback modals (ignore Zap/Multi-item behavior)
@@ -3664,14 +3827,13 @@ export default function Home() {
       err: err || null,
       metadata
     });
-    // Show webhook panel only for products that require webhooks (CRA products), except in Zap mode
+      // Show webhook panel whenever webhooks are configured (dev), except in Zap mode
     if (!zapMode) {
-      // When multi-item is enabled for CRA products, keep CRA flow but do NOT show the webhook modal.
-      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
-        setShowWebhookPanel(true);
-      }
+        if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
+          setShowWebhookPanel(true);
+        }
     }
-  }, [multiItemLinkEnabled, zapMode, selectedChildProduct, selectedProduct]);
+  }, [multiItemLinkEnabled, zapMode]);
 
   const onEvent = useCallback((eventName: string, metadata: any) => {
     // Add event to the logs
@@ -4016,37 +4178,74 @@ export default function Home() {
   };
 
   const handleDemoModeStart = async () => {
-    // Build products array dynamically based on enabled products
     const enabledProductIds = Object.keys(demoProductsVisibility).filter(
-      id => demoProductsVisibility[id]
+      (id) => demoProductsVisibility[id] && id !== 'link' && !id.startsWith('link-')
     );
-    
-    const productsSet = new Set<string>();
-    
-    enabledProductIds.forEach(productId => {
-      // Check if it's a parent product
-      const parentProduct = PRODUCTS_ARRAY.find(p => p.id === productId);
-      
-      if (parentProduct) {
-        // It's a parent - add its products
-        parentProduct.products.forEach(p => productsSet.add(p));
-      } else {
-        // It's a child - find its parent
-        const parent = PRODUCTS_ARRAY.find(p => 
-          p.children?.some(c => c.id === productId)
-        );
-        
-        if (parent) {
-          // Add parent's products
-          parent.products.forEach(p => productsSet.add(p));
-        }
+
+    const collectLeafConfigs = (cfg: ProductConfig): ProductConfig[] => {
+      if (!cfg.children || cfg.children.length === 0) {
+        return [cfg];
       }
-    });
-    
-    // Convert set to array (automatically de-duplicated)
+      return cfg.children.flatMap(collectLeafConfigs);
+    };
+
+    const hasAnyEnabledDescendant = (cfg: ProductConfig): boolean => {
+      if (!cfg.children || cfg.children.length === 0) return false;
+      for (const child of cfg.children) {
+        if (demoProductsVisibility[child.id]) return true;
+        if (hasAnyEnabledDescendant(child)) return true;
+      }
+      return false;
+    };
+
+    // Expand selected IDs into leaf configs (parents → descendants, children-with-grandchildren → grandchildren, etc.)
+    const leafConfigsById = new Map<string, ProductConfig>();
+    for (const id of enabledProductIds) {
+      const cfg = getProductConfigById(id);
+      if (!cfg) continue;
+      // If a parent was auto-selected due to selecting a descendant, treat it as UI-only and
+      // do not expand it into "select all leaves".
+      if (cfg.children && cfg.children.length > 0 && hasAnyEnabledDescendant(cfg)) {
+        continue;
+      }
+      for (const leaf of collectLeafConfigs(cfg)) {
+        // Ignore Link pseudo-products in Demo Mode defensively
+        if (leaf.id === 'link' || leaf.id.startsWith('link-')) continue;
+        leafConfigsById.set(leaf.id, leaf);
+      }
+    }
+    const selectedLeafConfigs = Array.from(leafConfigsById.values());
+
+    // Build products[] for /link/token/create from all enabled leaf configs
+    const productsSet = new Set<string>();
+    let mergedAdditionalLinkParams: Record<string, any> = {};
+    for (const leaf of selectedLeafConfigs) {
+      for (const p of Array.isArray(leaf.products) ? leaf.products : []) {
+        if (typeof p === 'string' && p) productsSet.add(p);
+      }
+      for (const p of Array.isArray(leaf.required_if_supported) ? leaf.required_if_supported : []) {
+        if (typeof p === 'string' && p) productsSet.add(p);
+      }
+      if (leaf.additionalLinkParams && typeof leaf.additionalLinkParams === 'object') {
+        mergedAdditionalLinkParams = { ...mergedAdditionalLinkParams, ...leaf.additionalLinkParams };
+      }
+    }
     const products = Array.from(productsSet);
-    
-    // Create Link token config with dynamically built products
+    const includesCra = products.some((p) => p.startsWith('cra_')) || selectedLeafConfigs.some((c) => !!c.isCRA);
+
+    // CRA in Demo Mode requires a webhook URL (so we can wait for readiness later)
+    if (includesCra && !effectiveWebhookConfigUrl) {
+      setErrorData({
+        error: 'WEBHOOK_URL_REQUIRED',
+        message: 'Configure a webhook URL in Settings before starting Demo Mode with CRA products.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      setShowWelcome(false);
+      return;
+    }
+
     const demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
@@ -4054,24 +4253,45 @@ export default function Home() {
         : { client_user_id: generateClientUserId() },
       client_name: 'Plaid Flash',
       products,
-      transactions: {
-        days_requested: 14
-      },
       country_codes: ['US'],
       language: 'en'
     };
 
+    // Only include transactions config when transactions is selected
+    if (productsSet.has('transactions')) {
+      demoConfig.transactions = { days_requested: 14 };
+    }
+
+    // Merge any per-product additional link params (e.g., CRA permissible purpose)
+    Object.assign(demoConfig, mergedAdditionalLinkParams);
+
+    // Add webhook if needed (CRA, Hosted Link, or Multi-item Link)
+    if (effectiveWebhookConfigUrl && (includesCra || hostedLinkEnabled || multiItemLinkEnabled)) {
+      demoConfig.webhook = effectiveWebhookConfigUrl;
+    }
+
     if (hostedLinkEnabled) {
       demoConfig.hosted_link = {};
-      if (effectiveWebhookConfigUrl) {
-        demoConfig.webhook = effectiveWebhookConfigUrl;
-      }
+    }
+
+    if (multiItemLinkEnabled) {
+      demoConfig.enable_multi_item_link = true;
     }
     
     // Set flag that we're starting demo mode
     setIsDemoModeStarting(true);
-    
-    // Show config preview modal - when user clicks Proceed, it will continue with demo mode
+
+    if (includesCra) {
+      // CRA requires /user/create first so we can include user_id/user_token in /link/token/create
+      const craLeaf = selectedLeafConfigs.find((c) => c.isCRA);
+      const craProductIdForUserCreate = craLeaf?.id || 'cra-base-report';
+      setDemoPendingLinkTokenConfig(demoConfig);
+      showUserCreatePreview(craProductIdForUserCreate);
+      return;
+    }
+
+    // Non-CRA demo: show /link/token/create preview directly
+    setDemoPendingLinkTokenConfig(null);
     setLinkTokenConfig(demoConfig);
     setModalState('preview-config');
     setShowModal(true);
@@ -4104,8 +4324,7 @@ export default function Home() {
     
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
-    const credsFlag = usedAltCredentials || useAltCredentials;
-    const shouldRemoveUser = hybridModeActive || productConfig?.isCRA;
+    const shouldRemoveBothForHybrid = hybridModeActive;
 
     // If auto-remove is disabled, bypass deletion and return to main menu
     if (!autoRemoveEnabled) {
@@ -4168,35 +4387,47 @@ export default function Home() {
       return;
     }
 
-    // Clean up Plaid user (CRA/hybrid) or item (non-CRA-only)
-    if (shouldRemoveUser ? (userId || userToken) : (accessToken || demoAccessToken)) {
+    // Clean up Plaid user/item
+    const tokenToRemove = accessToken || demoAccessToken;
+    const hasItemToRemove = !!tokenToRemove;
+    const hasUserToRemove = !!(userId || userToken);
+
+    if (
+      (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
+      (!shouldRemoveBothForHybrid && productConfig?.isCRA && hasUserToRemove) ||
+      (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
+    ) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       
       try {
-        if (shouldRemoveUser) {
+        if (shouldRemoveBothForHybrid) {
+          if (hasItemToRemove) {
+            await fetch('/api/item-remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token: tokenToRemove }),
+            });
+          }
+          if (hasUserToRemove) {
+            await fetch('/api/user-remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: userId, user_token: userToken }),
+            });
+          }
+        } else if (productConfig?.isCRA) {
           await fetch('/api/user-remove', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              user_id: userId,
-              user_token: userToken,
-              useAltCredentials: credsFlag,
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, user_token: userToken }),
           });
         } else {
           await fetch('/api/item-remove', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              access_token: accessToken || demoAccessToken,
-              useAltCredentials: credsFlag,
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: tokenToRemove }),
           });
         }
       } catch (error) {
@@ -4358,8 +4589,7 @@ export default function Home() {
     // Zap Mode reset: clean up and return to product selection
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
-    const credsFlag = usedAltCredentials || useAltCredentials;
-    const shouldRemoveUser = hybridModeActive || productConfig?.isCRA;
+    const shouldRemoveBothForHybrid = hybridModeActive;
 
     // Reset Hosted Link waiting UI
     setHostedLinkActive(false);
@@ -4409,32 +4639,46 @@ export default function Home() {
       return;
     }
 
-    if (shouldRemoveUser ? (userId || userToken) : accessToken) {
+    const hasItemToRemove = !!accessToken;
+    const hasUserToRemove = !!(userId || userToken);
+
+    if (
+      (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
+      (!shouldRemoveBothForHybrid && productConfig?.isCRA && hasUserToRemove) ||
+      (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
+    ) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       setShowZapResetButton(false);
       
       try {
-        if (shouldRemoveUser) {
+        if (shouldRemoveBothForHybrid) {
+          if (hasItemToRemove) {
+            await fetch('/api/item-remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token: accessToken }),
+            });
+          }
+          if (hasUserToRemove) {
+            await fetch('/api/user-remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: userId, user_token: userToken }),
+            });
+          }
+        } else if (productConfig?.isCRA) {
           await fetch('/api/user-remove', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              user_id: userId,
-              user_token: userToken,
-              useAltCredentials: credsFlag,
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, user_token: userToken }),
           });
         } else {
           await fetch('/api/item-remove', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ access_token: accessToken, useAltCredentials: credsFlag }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: accessToken }),
           });
         }
       } catch (error) {
@@ -4531,14 +4775,12 @@ export default function Home() {
       setModalState('processing-accounts');
       setShowModal(true);
 
-      const credsFlag = usedAltCredentials || useAltCredentials;
-
       const tokenInfos = await Promise.all(
         publicTokens.map(async (public_token) => {
           const exchangeResponse = await fetch('/api/exchange-public-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ public_token }),
           });
 
           const exchangeData = await exchangeResponse.json();
@@ -4557,7 +4799,7 @@ export default function Home() {
             const itemResponse = await fetch('/api/item-get', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ access_token, useAltCredentials: credsFlag }),
+              body: JSON.stringify({ access_token }),
             });
             const itemData = await itemResponse.json();
             if (itemResponse.ok) {
@@ -4572,7 +4814,6 @@ export default function Home() {
                 body: JSON.stringify({
                   institution_id,
                   country_codes: ['US'],
-                  useAltCredentials: credsFlag,
                 }),
               });
               const instData = await instResponse.json();
@@ -4607,9 +4848,7 @@ export default function Home() {
 
       // CRA products still use user_id/user_token downstream
       if (productConfig.isCRA) {
-        const baseParams: any = {
-          useAltCredentials: credsFlag,
-        };
+        const baseParams: any = {};
         if (usedUserToken && userToken) {
           baseParams.user_token = userToken;
         } else if (userId) {
@@ -4629,7 +4868,7 @@ export default function Home() {
         const accountsResponse = await fetch('/api/accounts-get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_token: activeAccessToken, useAltCredentials: credsFlag }),
+          body: JSON.stringify({ access_token: activeAccessToken }),
         });
         const accountsJson = await accountsResponse.json();
         if (accountsResponse.status >= 400) {
@@ -4650,7 +4889,7 @@ export default function Home() {
         }
 
         const requestBody = buildProductRequestBody(
-          { access_token: activeAccessToken, useAltCredentials: credsFlag },
+          { access_token: activeAccessToken },
           productConfig
         );
 
@@ -4768,8 +5007,7 @@ export default function Home() {
     const step = queueToUse[index];
     if (!step) return;
 
-    const credsFlag = usedAltCredentials || useAltCredentials;
-    const tokenToUse = accessTokenOverride || accessToken;
+    const tokenToUse = accessTokenOverride || accessTokenRef.current || accessToken;
 
     try {
       if (step.kind === 'accounts') {
@@ -4784,7 +5022,7 @@ export default function Home() {
         const accountsResponse = await fetch('/api/accounts-get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_token: tokenToUse, useAltCredentials: credsFlag }),
+          body: JSON.stringify({ access_token: tokenToUse }),
         });
         const accountsJson = await accountsResponse.json();
         if (accountsResponse.status >= 400) {
@@ -4813,7 +5051,7 @@ export default function Home() {
       setModalState('processing-product');
       setShowModal(true);
 
-      let requestBody: any = { useAltCredentials: credsFlag };
+      let requestBody: any = {};
 
       if (step.isCRA) {
         if (usedUserToken && userToken) {
@@ -4880,7 +5118,6 @@ export default function Home() {
 
       // Hybrid: exchange (use first public_token) then run the hybrid queue
       if (hybridModeActive) {
-        const credsFlag = usedAltCredentials || useAltCredentials;
         const firstToken = publicTokens?.[0];
         if (!firstToken) {
           throw new Error('Missing public_token for hybrid flow');
@@ -4892,7 +5129,7 @@ export default function Home() {
         const exchangeResponse = await fetch('/api/exchange-public-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ public_token: firstToken, useAltCredentials: credsFlag }),
+          body: JSON.stringify({ public_token: firstToken }),
         });
         const exchangeJson = await exchangeResponse.json();
         if (!exchangeResponse.ok) {
@@ -4918,7 +5155,7 @@ export default function Home() {
         if (!productConfig.apiEndpoint) {
           throw new Error('Product API endpoint not configured');
         }
-        const baseParams: any = { useAltCredentials: usedAltCredentials || useAltCredentials };
+        const baseParams: any = {};
         if (usedUserToken && userToken) {
           baseParams.user_token = userToken;
         } else if (userId) {
@@ -4948,8 +5185,6 @@ export default function Home() {
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     if (!productConfig?.isCRA || !productConfig.apiEndpoint) return;
-
-    const credsFlag = usedAltCredentials || useAltCredentials;
     if (!userId) {
       setErrorData({
         error: 'MISSING_USER_ID',
@@ -4961,7 +5196,7 @@ export default function Home() {
       return;
     }
 
-    const requestBody = buildProductRequestBody({ user_id: userId, useAltCredentials: credsFlag }, productConfig);
+    const requestBody = buildProductRequestBody({ user_id: userId }, productConfig);
     setProductApiConfig(requestBody);
     setHostedWaitingMode('hosted_link');
     setCraCheckReportExpectedUserId(null);
@@ -4974,8 +5209,6 @@ export default function Home() {
     selectedGrandchildProduct,
     selectedChildProduct,
     selectedProduct,
-    usedAltCredentials,
-    useAltCredentials,
     userId,
     buildProductRequestBody,
   ]);
@@ -4988,8 +5221,6 @@ export default function Home() {
 
       const next = multiItemAccessTokens[nextIndex];
       if (!next?.access_token) return;
-
-      const credsFlag = usedAltCredentials || useAltCredentials;
 
       setActiveMultiItemAccessTokenIndex(nextIndex);
       setAccessToken(next.access_token);
@@ -5010,7 +5241,6 @@ export default function Home() {
 
         const baseBody: any = productApiConfig && typeof productApiConfig === 'object' ? { ...productApiConfig } : {};
         baseBody.access_token = next.access_token;
-        baseBody.useAltCredentials = credsFlag;
 
         // If the current request uses account_id (or the product is known to need it), refresh it for the new Item.
         const needsAccountId =
@@ -5022,7 +5252,7 @@ export default function Home() {
           const accountsResponse = await fetch('/api/accounts-get', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ access_token: next.access_token, useAltCredentials: credsFlag }),
+            body: JSON.stringify({ access_token: next.access_token }),
           });
           const accountsJson = await accountsResponse.json();
           if (accountsResponse.status >= 400) {
@@ -5069,7 +5299,7 @@ export default function Home() {
         const accountsResponse = await fetch('/api/accounts-get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_token: next.access_token, useAltCredentials: credsFlag }),
+          body: JSON.stringify({ access_token: next.access_token }),
         });
         const accountsJson = await accountsResponse.json();
         if (accountsResponse.status >= 400) {
@@ -5089,7 +5319,7 @@ export default function Home() {
         }
 
         const requestBody = buildProductRequestBody(
-          { access_token: next.access_token, useAltCredentials: credsFlag },
+          { access_token: next.access_token },
           productConfig
         );
 
@@ -5195,12 +5425,9 @@ export default function Home() {
       return;
     }
 
-    const credsFlag = usedAltCredentials || useAltCredentials;
-
     const baseParams: any = {
       item_id: cashflowUpdatesSelectedItem.item_id,
       webhook: effectiveWebhookConfigUrl,
-      useAltCredentials: credsFlag,
     };
     if (usedUserToken && userToken) {
       baseParams.user_token = userToken;
@@ -5246,7 +5473,6 @@ export default function Home() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        useAltCredentials: credsFlag,
         webhook_codes: ['LARGE_DEPOSIT_DETECTED'],
         ...(baseParams.user_id ? { user_id: baseParams.user_id } : {}),
         ...(baseParams.user_token ? { user_token: baseParams.user_token } : {}),
@@ -5273,18 +5499,13 @@ export default function Home() {
   }, [
     cashflowUpdatesSelectedItem,
     effectiveWebhookConfigUrl,
-    usedAltCredentials,
-    useAltCredentials,
     usedUserToken,
     userToken,
     userId,
   ]);
 
   const handleCashflowUpdatesFetchReport = useCallback(async () => {
-    const credsFlag = usedAltCredentials || useAltCredentials;
-
     const baseParams: any = {
-      useAltCredentials: credsFlag,
       consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
     };
     if (usedUserToken && userToken) {
@@ -5323,7 +5544,7 @@ export default function Home() {
     setApiStatusCode(resp.status);
     setModalState('success');
     setShowModal(true);
-  }, [usedAltCredentials, useAltCredentials, usedUserToken, userToken, userId]);
+  }, [usedUserToken, userToken, userId]);
 
   const renderModalContent = () => {
     if (modalState === 'update-mode-input') {
@@ -5404,8 +5625,14 @@ export default function Home() {
 
                 const cfg: any = {
                   link_customization_name: 'flash',
-                  // Update Mode: omit client_user_id; keep phone_number only if enabled.
-                  user: includePhoneNumber ? { phone_number: '+14155550011' } : {},
+                  // Update Mode (user-based): user.client_user_id must be supplied and should match the existing user.
+                  // We surface it in the config editor as an explicit required field.
+                  user:
+                    detectedType === 'user_token' || detectedType === 'user_id'
+                      ? { ...(includePhoneNumber ? { phone_number: '+14155550011' } : {}), client_user_id: '' }
+                      : includePhoneNumber
+                        ? { phone_number: '+14155550011' }
+                        : {},
                   client_name: 'Plaid Flash',
                   country_codes: ['US'],
                   language: 'en',
@@ -6633,7 +6860,7 @@ export default function Home() {
       <Modal isVisible={showProductModal}>
         <ProductSelector 
           products={demoLinkCompleted 
-            ? PRODUCTS_ARRAY.filter(p => demoProductsVisibility[p.id])
+            ? PRODUCTS_ARRAY.filter((p) => p.id !== 'link' && !p.id.startsWith('link-') && demoProductsVisibility[p.id])
             : PRODUCTS_ARRAY} 
           onSelect={handleProductSelect}
           isDisabled={getProductDisableInfo}
@@ -6646,7 +6873,7 @@ export default function Home() {
         {selectedProduct && PRODUCT_CONFIGS[selectedProduct]?.children && (
           <ProductSelector 
             products={demoLinkCompleted 
-              ? PRODUCT_CONFIGS[selectedProduct].children!.filter(c => demoProductsVisibility[c.id])
+              ? PRODUCT_CONFIGS[selectedProduct].children!.filter((c) => c.id !== 'link' && !c.id.startsWith('link-') && demoProductsVisibility[c.id])
               : PRODUCT_CONFIGS[selectedProduct].children!} 
             onSelect={handleChildProductSelect}
             isDisabled={getProductDisableInfo}
@@ -6669,7 +6896,7 @@ export default function Home() {
           return childConfig?.children && (
             <ProductSelector 
               products={demoLinkCompleted 
-                ? childConfig.children.filter(gc => demoProductsVisibility[gc.id])
+                ? childConfig.children.filter((gc) => gc.id !== 'link' && !gc.id.startsWith('link-') && demoProductsVisibility[gc.id])
                 : childConfig.children} 
               onSelect={handleGrandchildProductSelect}
               isDisabled={getProductDisableInfo}
@@ -6897,7 +7124,7 @@ export default function Home() {
             <h2>Select Products to Demo</h2>
           </div>
           <div className="demo-products-grid">
-            {PRODUCTS_ARRAY.map(product => (
+            {PRODUCTS_ARRAY.filter((p) => p.id !== 'link' && !p.id.startsWith('link-')).map(product => (
               <div key={product.id} className="product-group-container">
                 <div className="product-group">
                   <SettingsToggle
@@ -6908,7 +7135,9 @@ export default function Home() {
                   />
                   {product.children && (
                     <div className="product-children-nested">
-                      {product.children.map(child => (
+                      {product.children
+                        .filter((c) => c.id !== 'link' && !c.id.startsWith('link-'))
+                        .map(child => (
                         <SettingsToggle
                           key={child.id}
                           label={child.shortName || child.name}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPlaidKeys } from '@/lib/server/plaidCredentials';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,7 +10,6 @@ export async function POST(request: NextRequest) {
       days_requested,
       consumer_report_permissible_purpose,
       products,
-      useAltCredentials,
     } = body || {};
 
     if (!user_id || typeof user_id !== 'string') {
@@ -36,13 +36,7 @@ export async function POST(request: NextRequest) {
     const normalizedDaysRequested =
       typeof days_requested === 'number' && Number.isFinite(days_requested) ? days_requested : 365;
 
-    // Select credentials based on flag
-    const clientId =
-      useAltCredentials && process.env.ALT_PLAID_CLIENT_ID
-        ? process.env.ALT_PLAID_CLIENT_ID
-        : process.env.PLAID_CLIENT_ID;
-    const secret =
-      useAltCredentials && process.env.ALT_PLAID_SECRET ? process.env.ALT_PLAID_SECRET : process.env.PLAID_SECRET;
+    const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody: any = {
       client_id: clientId,

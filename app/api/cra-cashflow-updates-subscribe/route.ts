@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPlaidKeys } from '@/lib/server/plaidCredentials';
 
 export async function POST(request: NextRequest) {
   try {
-    const { user_id, user_token, item_id, webhook, useAltCredentials } = await request.json();
+    const { user_id, user_token, item_id, webhook } = await request.json();
 
     if (!item_id) {
       return NextResponse.json({ error: 'item_id is required' }, { status: 400 });
@@ -12,15 +13,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'webhook is required' }, { status: 400 });
     }
 
-    // Select credentials based on flag
-    const clientId =
-      useAltCredentials && process.env.ALT_PLAID_CLIENT_ID
-        ? process.env.ALT_PLAID_CLIENT_ID
-        : process.env.PLAID_CLIENT_ID;
-    const secret =
-      useAltCredentials && process.env.ALT_PLAID_SECRET
-        ? process.env.ALT_PLAID_SECRET
-        : process.env.PLAID_SECRET;
+    const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody: any = {
       client_id: clientId,
