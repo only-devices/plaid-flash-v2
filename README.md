@@ -98,6 +98,14 @@ Under **Link → Update Mode**, you can paste:
 
 Update Mode does **not** run downstream product APIs and does **not** automatically remove the Item/User at the end.
 
+### Upgrade Mode
+
+Upgrade Mode is a Plaid flow that lets you add Plaid CRA functionality to existing non-CRA items, and call CRA endpoints once the upgrade is complete. You need only an existing access_token to get started:
+
+1. Preview + run `/user/create` (supports `user_id` or legacy `user_token` based on the **Use legacy user_token** toggle)
+2. Preview `/link/token/create` (you’ll paste the `access_token` and can edit products/options)
+3. Complete Link, wait for `CHECK_REPORT / USER_CHECK_REPORT_READY`, then run the CRA `/get` endpoint
+
 ## Supported products
 
 Product definitions live in `lib/productConfig.ts`. Leaf products below include the Plaid API they call (as shown in the UI).
