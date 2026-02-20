@@ -395,6 +395,15 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         },
         requiresWebhook: true,
         layerTemplateId: 'template_phj5hyzpc3v5'
+      },
+      {
+        id: 'link-upgrade-mode',
+        name: 'Upgrade Mode',
+        shortName: 'Upgrade Mode',
+        products: [],
+        required_if_supported: [],
+        gradient: 'linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%)',
+        icon: '/icons/layer.png',
       }
     ]
   },

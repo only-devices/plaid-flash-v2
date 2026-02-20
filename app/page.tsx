@@ -87,6 +87,7 @@ export default function Home() {
     | 'creating-sandbox-item'
     | 'hosted-waiting'
     | 'update-mode-input'
+    | 'upgrade-mode-pick-product'
     | 'hybrid-step'
     | 'cashflow-updates-loading-items'
     | 'cashflow-updates-pick-item'
@@ -178,6 +179,9 @@ export default function Home() {
 
   // Product API Preview state
   const [productApiConfig, setProductApiConfig] = useState<any>(null);
+  // In some flows (e.g. Upgrade Mode), the selected product is not the API target.
+  // This override tells the Product API preview/execution which leaf config to use.
+  const [productApiTargetProductId, setProductApiTargetProductId] = useState<string | null>(null);
   const [isEditingProductApiConfig, setIsEditingProductApiConfig] = useState(false);
   const [editedProductApiConfig, setEditedProductApiConfig] = useState('');
   const [productApiConfigError, setProductApiConfigError] = useState<string | null>(null);
@@ -257,6 +261,10 @@ export default function Home() {
   // Update Mode (Link-only) state
   const [updateModeAccessTokenInput, setUpdateModeAccessTokenInput] = useState<string>('');
 
+  // Upgrade Mode (Link-only, CRA-like) state
+  const [upgradeModeProductCandidates, setUpgradeModeProductCandidates] = useState<ProductConfig[]>([]);
+  const [upgradeModeSelectedProductIndex, setUpgradeModeSelectedProductIndex] = useState<number>(0);
+
   // CRA Monitoring Insights (Cashflow Updates) state
   type CashflowUpdatesItem = { institution_name: string; item_id: string };
   const [cashflowUpdatesItems, setCashflowUpdatesItems] = useState<CashflowUpdatesItem[]>([]);
@@ -325,11 +333,19 @@ export default function Home() {
           productId === 'signal-evaluate' ||
           productId === 'signal-balance' ||
           productId === 'investments-move' ||
-          productId === 'link-update-mode')
+          productId === 'link-update-mode' ||
+          productId === 'link-upgrade-mode')
       ) {
         return {
           disabled: true,
           reason: 'Disable Layer in settings to use this product.',
+        };
+      }
+
+      if (productId === 'link-upgrade-mode' && !effectiveWebhookConfigUrl) {
+        return {
+          disabled: true,
+          reason: 'Configure a webhook URL in settings first.',
         };
       }
 
@@ -899,6 +915,29 @@ export default function Home() {
       return;
     }
 
+    // Link-only: Upgrade Mode starts with /user/create (same as Multi-item Link Step 1)
+    if (productId === 'link-upgrade-mode') {
+      setUpgradeModeProductCandidates([]);
+      setUpgradeModeSelectedProductIndex(0);
+      setConfigError(null);
+      setIsEditingConfig(false);
+
+      if (!effectiveWebhookConfigUrl) {
+        setErrorData({
+          error: 'WEBHOOK_URL_REQUIRED',
+          message: 'Configure a webhook URL in Settings before using Upgrade Mode.',
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      showUserCreatePreview(productId);
+      return;
+    }
+
     // Layer flow: use /session/token/create + submit-driven eligibility
     if (layerMode) {
       if (!effectiveWebhookConfigUrl) {
@@ -1033,12 +1072,57 @@ export default function Home() {
     let userConfig: any;
 
     // Multi-item Link (non-CRA): /user/create only needs client_user_id
+    // Upgrade Mode: include identity (or consumer_report_user_identity) like CRA flows.
     // Keep CRA behavior unchanged.
     const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig.isCRA;
+    const isUpgradeModeUserCreate = productId === 'link-upgrade-mode';
     
     if (isNonCraMultiItemUserCreate) {
       userConfig = {
         client_user_id: 'multi_item_user_' + Date.now(),
+      };
+    } else if (isUpgradeModeUserCreate && useLegacyUserToken) {
+      userConfig = {
+        client_user_id: 'upgrade_mode_user_' + Date.now(),
+        consumer_report_user_identity: {
+          first_name: 'Flash',
+          last_name: 'User',
+          ssn_last_4: '1234',
+          date_of_birth: '1970-01-01',
+          phone_numbers: ['+14155550011'],
+          emails: ['email@example.com'],
+          primary_address: {
+            city: 'Greenville',
+            region: 'SC',
+            street: '650 N Academy St',
+            postal_code: '29601',
+            country: 'US',
+          },
+        },
+      };
+    } else if (isUpgradeModeUserCreate) {
+      userConfig = {
+        client_user_id: 'upgrade_mode_user_' + Date.now(),
+        identity: {
+          name: {
+            given_name: 'Test',
+            family_name: 'User',
+          },
+          date_of_birth: '1970-01-31',
+          emails: [{ data: 'test@email.com', primary: true }],
+          phone_numbers: [{ data: '+14155550011', primary: true }],
+          addresses: [
+            {
+              street_1: '100 Grey St',
+              city: 'San Francisco',
+              region: 'CA',
+              country: 'US',
+              postal_code: '94109',
+              primary: true,
+            },
+          ],
+          id_numbers: [{ value: '1234', type: 'us_ssn_last_4' }],
+        },
       };
     } else if (layerMode && productConfig.isCRA && !useLegacyUserToken) {
       // Layer + CRA (user_id flow): identity will be collected in Layer and persisted later via /user/update.
@@ -1115,6 +1199,7 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
+      const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
       
       const response = await fetch('/api/user-create', {
         method: 'POST',
@@ -1125,7 +1210,9 @@ export default function Home() {
           isNonCraMultiItemUserCreate
             ? {
                 // Non-CRA Multi-item: only client_user_id is required
-                client_user_id: configToUse?.client_user_id || 'multi_item_user_' + Date.now(),
+                client_user_id:
+                  String(configToUse?.client_user_id || '').trim() ||
+                  'multi_item_user_' + Date.now(),
               }
             : {
                 ...configToUse,
@@ -1159,10 +1246,54 @@ export default function Home() {
         // Legacy mode: only store user_token
         setUserId(null);
         setUserToken(newUserToken);
+        setUsedUserToken(true);
       } else {
         // New mode: only store user_id
         setUserId(newUserId);
         setUserToken(null);
+        setUsedUserToken(false);
+      }
+
+      // Upgrade Mode: after /user/create, proceed to /link/token/create config editor.
+      // We include an empty access_token that must be filled in by the user.
+      if (isUpgradeMode) {
+        const client_user_id = String(configToUse?.client_user_id || '').trim();
+        if (!client_user_id) {
+          setErrorData({ error: 'MISSING_CLIENT_USER_ID', message: 'client_user_id is required for Upgrade Mode.' });
+          setApiStatusCode(400);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+        if (!effectiveWebhookConfigUrl) {
+          setErrorData({ error: 'WEBHOOK_URL_REQUIRED', message: 'Configure a webhook URL in Settings before using Upgrade Mode.' });
+          setApiStatusCode(400);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+
+        const cfg: any = {
+          link_customization_name: 'flash',
+          client_name: 'Plaid Flash',
+          country_codes: ['US'],
+          language: 'en',
+          products: ['cra_base_report'],
+          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+          cra_options: { days_requested: 365 },
+          webhook: effectiveWebhookConfigUrl,
+          access_token: '',
+          ...(useLegacyUserToken && newUserToken ? { user_token: newUserToken } : newUserId ? { user_id: newUserId } : {}),
+          user: {
+            client_user_id,
+            ...(includePhoneNumber ? { phone_number: '+14155550011' } : {}),
+          },
+        };
+
+        setLinkTokenConfig(cfg);
+        setModalState('preview-config');
+        setShowModal(true);
+        return;
       }
 
       // Demo Mode CRA bootstrap: after /user/create, resume pending /link/token/create preview
@@ -1424,6 +1555,10 @@ export default function Home() {
 
   const validateLinkTokenCreateConfig = (cfg: any): string | null => {
     if (!cfg || typeof cfg !== 'object') return 'Invalid JSON: configuration must be an object';
+    if (Object.prototype.hasOwnProperty.call(cfg, 'access_token')) {
+      const v = typeof (cfg as any).access_token === 'string' ? String((cfg as any).access_token).trim() : '';
+      if (!v) return 'access_token is required. Please set it in the /link/token/create config.';
+    }
     const isUserBasedUpdate = (typeof cfg.user_id === 'string' && cfg.user_id.trim().length > 0) || (typeof cfg.user_token === 'string' && cfg.user_token.trim().length > 0);
     if (!isUserBasedUpdate) return null;
 
@@ -2120,7 +2255,9 @@ export default function Home() {
       // Proceed with product API call
       try {
         const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-        const productConfig = getProductConfigById(effectiveProductId!);
+        const productIdForApi =
+          effectiveProductId === 'link-upgrade-mode' ? productApiTargetProductId || effectiveProductId : effectiveProductId;
+        const productConfig = getProductConfigById(productIdForApi!);
         
         if (!productConfig || !productConfig.apiEndpoint) {
           throw new Error('Product API endpoint not configured');
@@ -2185,7 +2322,9 @@ export default function Home() {
     
     try {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-      const productConfig = getProductConfigById(effectiveProductId!);
+      const productIdForApi =
+        effectiveProductId === 'link-upgrade-mode' ? productApiTargetProductId || effectiveProductId : effectiveProductId;
+      const productConfig = getProductConfigById(productIdForApi!);
       
       if (!productConfig || !productConfig.apiEndpoint) {
         throw new Error('Product API endpoint not configured');
@@ -3026,6 +3165,37 @@ export default function Home() {
     // Link-only: Update Mode does not run downstream APIs or cleanup; return to main menu.
     if (effectiveProductId === 'link-update-mode') {
       returnToProductMenuNoRemove();
+      return;
+    }
+
+    // Link-only: Upgrade Mode behaves like CRA post-Link (wait for USER_CHECK_REPORT_READY, then call one CRA endpoint).
+    if (effectiveProductId === 'link-upgrade-mode') {
+      const expectedUserId = userId || null;
+      const hasReadyWebhook = (webhooks || []).some((w: any) => {
+        const webhookType = w.webhook_type ?? w.payload?.webhook_type;
+        const webhookCode = w.webhook_code ?? w.payload?.webhook_code;
+        if (webhookType !== 'CHECK_REPORT') return false;
+        if (webhookCode !== 'USER_CHECK_REPORT_READY') return false;
+        if (!expectedUserId) return true;
+        const payloadUserId = w.payload?.user_id ?? w.payload?.user?.user_id ?? w.user_id;
+        return !payloadUserId || payloadUserId === expectedUserId;
+      });
+
+      if (!hasReadyWebhook) {
+        // Reuse hosted-waiting (dev: shows MultiItemWebhookPanel in check_report mode; prod: manual paste)
+        setHostedWaitingMode('cra_check_report');
+        setCraCheckReportExpectedUserId(expectedUserId);
+        setCraCheckReportManualReady(false);
+        setHostedLinkUrl(null);
+        setHostedLinkManualPayload('');
+        setHostedLinkManualParseError(null);
+        setHostedLinkExtractedPublicTokens([]);
+        setModalState('hosted-waiting');
+        setShowModal(true);
+        return;
+      }
+
+      handleUpgradeModeReportReadyForward();
       return;
     }
     
@@ -4325,6 +4495,7 @@ export default function Home() {
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const shouldRemoveBothForHybrid = hybridModeActive;
+    const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
 
     // If auto-remove is disabled, bypass deletion and return to main menu
     if (!autoRemoveEnabled) {
@@ -4394,7 +4565,7 @@ export default function Home() {
 
     if (
       (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
-      (!shouldRemoveBothForHybrid && productConfig?.isCRA && hasUserToRemove) ||
+      (!shouldRemoveBothForHybrid && (productConfig?.isCRA || isUpgradeMode) && hasUserToRemove) ||
       (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
     ) {
       // Show tidying up message
@@ -4417,7 +4588,7 @@ export default function Home() {
               body: JSON.stringify({ user_id: userId, user_token: userToken }),
             });
           }
-        } else if (productConfig?.isCRA) {
+        } else if (productConfig?.isCRA || isUpgradeMode) {
           await fetch('/api/user-remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4590,6 +4761,7 @@ export default function Home() {
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const shouldRemoveBothForHybrid = hybridModeActive;
+    const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
 
     // Reset Hosted Link waiting UI
     setHostedLinkActive(false);
@@ -4644,7 +4816,7 @@ export default function Home() {
 
     if (
       (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
-      (!shouldRemoveBothForHybrid && productConfig?.isCRA && hasUserToRemove) ||
+      (!shouldRemoveBothForHybrid && (productConfig?.isCRA || isUpgradeMode) && hasUserToRemove) ||
       (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
     ) {
       // Show tidying up message
@@ -4668,7 +4840,7 @@ export default function Home() {
               body: JSON.stringify({ user_id: userId, user_token: userToken }),
             });
           }
-        } else if (productConfig?.isCRA) {
+        } else if (productConfig?.isCRA || isUpgradeMode) {
           await fetch('/api/user-remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -5209,6 +5381,87 @@ export default function Home() {
     selectedGrandchildProduct,
     selectedChildProduct,
     selectedProduct,
+    userId,
+    buildProductRequestBody,
+  ]);
+
+  const handleUpgradeModeReportReadyForward = useCallback(() => {
+    const config = linkTokenConfig;
+
+    const productsArr = Array.isArray(config?.products) ? config.products : [];
+    const requiredArr = Array.isArray(config?.required_if_supported_products) ? config.required_if_supported_products : [];
+    const optionalArr = Array.isArray(config?.optional_products) ? config.optional_products : [];
+
+    const merged = [...productsArr, ...requiredArr, ...optionalArr].filter(
+      (p): p is string => typeof p === 'string' && p.length > 0
+    );
+    const unique = Array.from(new Set(merged));
+    const craProducts = unique.filter((p) => p.startsWith('cra_'));
+
+    const candidates = pickCraLeafConfigsForHybrid(craProducts);
+    if (candidates.length === 0) {
+      setErrorData({
+        error: 'UPGRADE_MODE_NO_PRODUCTS',
+        message:
+          'No CRA leaf products could be determined from the /link/token/create config. Ensure products include CRA product strings (cra_...).',
+        cra_products: craProducts,
+        config,
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    // Skip the intermediate picker screen. Default to the first candidate, and allow
+    // switching via the selector in the Product API preview header.
+    const first = candidates[0];
+    if (!first?.apiEndpoint) {
+      setErrorData({
+        error: 'UPGRADE_MODE_NO_ENDPOINT',
+        message: 'No Product API endpoint configured for the mapped CRA product.',
+        candidates: candidates.map((c) => ({ id: c.id, apiEndpoint: c.apiEndpoint })),
+      });
+      setApiStatusCode(500);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    const baseParams: any = {};
+    if (usedUserToken && userToken) {
+      baseParams.user_token = userToken;
+    } else if (userId) {
+      baseParams.user_id = userId;
+    } else if (userToken) {
+      baseParams.user_token = userToken;
+    } else {
+      setErrorData({ error: 'MISSING_USER', message: 'Missing user_id/user_token for Upgrade Mode call.' });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    const requestBody = buildProductRequestBody(baseParams, first);
+    setUpgradeModeProductCandidates(candidates);
+    setUpgradeModeSelectedProductIndex(0);
+    setProductApiTargetProductId(first.id);
+    setProductApiConfig(requestBody);
+    setHostedWaitingMode('hosted_link');
+    setCraCheckReportExpectedUserId(null);
+    setCraCheckReportManualReady(false);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setModalState('preview-product-api');
+    setShowModal(true);
+  }, [
+    linkTokenConfig,
+    pickCraLeafConfigsForHybrid,
+    setUpgradeModeProductCandidates,
+    setUpgradeModeSelectedProductIndex,
+    usedUserToken,
+    userToken,
     userId,
     buildProductRequestBody,
   ]);
@@ -5845,12 +6098,20 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
       const isCRA = productConfig?.isCRA;
+      const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
       
       return (
         <div className="modal-success">
           <div className="success-header">
             <h2>Step 1: Here&apos;s the /user/create configuration:</h2>
           </div>
+          {isUpgradeMode && (
+            <div className="account-data" style={{ paddingTop: 0, paddingBottom: 0 }}>
+              <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85, fontSize: 12 }}>
+                Enter the <code>client_user_id</code> you want to use for this Upgrade Mode session in the config below.
+              </p>
+            </div>
+          )}
           {!isEditingUserCreateConfig ? (
             <>
               <div className="account-data config-data-with-edit">
@@ -6139,6 +6400,76 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'upgrade-mode-pick-product') {
+      const candidates = upgradeModeProductCandidates || [];
+      const selectedIdx = Math.min(Math.max(upgradeModeSelectedProductIndex, 0), Math.max(candidates.length - 1, 0));
+      const selectedCfg = candidates[selectedIdx] || null;
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Upgrade Mode</h2>
+          </div>
+
+          <div className="account-data">
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+              Select which CRA endpoint you’d like to call.
+            </p>
+            <select
+              className="access-token-picker"
+              value={selectedIdx}
+              onChange={(e) => setUpgradeModeSelectedProductIndex(Number(e.target.value))}
+              aria-label="Select product"
+              disabled={candidates.length <= 1}
+            >
+              {candidates.map((cfg, idx) => (
+                <option key={cfg.id} value={idx}>
+                  {cfg.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedCfg && (
+              <div className="account-data config-data-with-edit" style={{ marginTop: 14 }}>
+                <JsonHighlight data={{ product_id: selectedCfg.id, api: selectedCfg.apiTitle || selectedCfg.apiEndpoint }} />
+              </div>
+            )}
+          </div>
+
+          <div className="modal-button-row two-buttons">
+            <ArrowButton variant="red" direction="back" onClick={() => setModalState('callback-success')} />
+            <ArrowButton
+              variant="blue"
+              disabled={!selectedCfg || !selectedCfg.apiEndpoint}
+              onClick={() => {
+                if (!selectedCfg?.apiEndpoint) return;
+                const baseParams: any = {};
+                if (usedUserToken && userToken) {
+                  baseParams.user_token = userToken;
+                } else if (userId) {
+                  baseParams.user_id = userId;
+                } else if (userToken) {
+                  baseParams.user_token = userToken;
+                } else {
+                  setErrorData({ error: 'MISSING_USER', message: 'Missing user_id/user_token for Upgrade Mode call.' });
+                  setApiStatusCode(400);
+                  setModalState('api-error');
+                  setShowModal(true);
+                  return;
+                }
+
+                const requestBody = buildProductRequestBody(baseParams, selectedCfg);
+                setProductApiConfig(requestBody);
+                setProductApiTargetProductId(selectedCfg.id);
+                setModalState('preview-product-api');
+                setShowModal(true);
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     if (modalState === 'callback-exit' && callbackData) {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const isUpdateMode = effectiveProductId === 'link-update-mode';
@@ -6288,6 +6619,7 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
       const isUpdateMode = effectiveProductId === 'link-update-mode';
+      const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
       const isCraReportWaiting = hostedWaitingMode === 'cra_check_report';
       const allowForwardWithoutTokens = !isCraReportWaiting && (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
 
@@ -6321,7 +6653,9 @@ export default function Home() {
               webhooks={webhooks}
               onForward={(tokens) =>
                 isCraReportWaiting
-                  ? handleCraLayerReportReadyForward()
+                  ? isUpgradeMode
+                    ? handleUpgradeModeReportReadyForward()
+                    : handleCraLayerReportReadyForward()
                   : isUpdateMode
                     ? returnToProductMenuNoRemove()
                     : handleHostedLinkForward(tokens)
@@ -6426,7 +6760,11 @@ export default function Home() {
                   variant="blue"
                   onClick={() => {
                     if (isCraReportWaiting) {
-                      handleCraLayerReportReadyForward();
+                      if (isUpgradeMode) {
+                        handleUpgradeModeReportReadyForward();
+                      } else {
+                        handleCraLayerReportReadyForward();
+                      }
                       return;
                     }
                     if (isUpdateMode) {
@@ -6620,7 +6958,9 @@ export default function Home() {
 
     if (modalState === 'preview-product-api' && productApiConfig) {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-      const productConfig = getProductConfigById(effectiveProductId!);
+      const productIdForApi =
+        effectiveProductId === 'link-upgrade-mode' ? productApiTargetProductId || effectiveProductId : effectiveProductId;
+      const productConfig = getProductConfigById(productIdForApi!);
       const isCRA = productConfig?.isCRA;
       
       // Extract endpoint name from apiEndpoint (e.g., "/api/transactions-get" -> "/transactions/get")
@@ -6637,6 +6977,48 @@ export default function Home() {
           <div className="modal-success">
             <div className="success-header">
               <h2>Here&apos;s the {apiName} call that will be made:</h2>
+              {effectiveProductId === 'link-upgrade-mode' && upgradeModeProductCandidates.length > 0 && (
+                <select
+                  className="access-token-picker"
+                  value={
+                    Math.max(
+                      0,
+                      upgradeModeProductCandidates.findIndex((c) => c.id === (productApiTargetProductId || upgradeModeProductCandidates[0]?.id))
+                    )
+                  }
+                  onChange={(e) => {
+                    const idx = Number(e.target.value);
+                    const nextCfg = upgradeModeProductCandidates[idx];
+                    if (!nextCfg) return;
+
+                    const baseParams: any = {};
+                    if (usedUserToken && userToken) {
+                      baseParams.user_token = userToken;
+                    } else if (userId) {
+                      baseParams.user_id = userId;
+                    } else if (userToken) {
+                      baseParams.user_token = userToken;
+                    } else {
+                      return;
+                    }
+
+                    const nextBody = buildProductRequestBody(baseParams, nextCfg);
+                    setProductApiTargetProductId(nextCfg.id);
+                    setProductApiConfig(nextBody);
+                    setIsEditingProductApiConfig(false);
+                    setEditedProductApiConfig('');
+                    setProductApiConfigError(null);
+                  }}
+                  aria-label="Select product"
+                  disabled={upgradeModeProductCandidates.length <= 1}
+                >
+                  {upgradeModeProductCandidates.map((cfg, idx) => (
+                    <option key={cfg.id} value={idx}>
+                      {cfg.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             {!isEditingProductApiConfig ? (
               <>
