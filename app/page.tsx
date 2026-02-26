@@ -2393,6 +2393,27 @@ export default function Home() {
     }
   };
 
+  const handleGoBackFromApiError = () => {
+    setErrorData(null);
+    setApiStatusCode(200);
+    const previous = lastStableModalStateRef.current;
+    const validStableStates: typeof modalState[] = [
+      'preview-user-create', 'preview-user-update', 'preview-config', 'preview-sandbox-config', 'preview-product-api',
+      'callback-success', 'callback-exit', 'callback-exit-zap', 'accounts-data', 'update-mode-input',
+      'upgrade-mode-pick-product', 'hybrid-step', 'cashflow-updates-pick-item', 'cashflow-updates-webhooks',
+      'success', 'error', 'zap-mode-results', 'layer-phone-submit', 'layer-waiting-eligibility', 'layer-dob-submit',
+      'layer-identity-match-results',
+    ];
+    if (previous && validStableStates.includes(previous)) {
+      setModalState(previous);
+      setShowModal(true);
+    } else {
+      setModalState('loading');
+      setShowProductModal(true);
+      setShowModal(false);
+    }
+  };
+
   const handleGoBackFromProductApiPreview = () => {
     // User wants to go back from product API preview
     setShowModal(false);
@@ -3087,8 +3108,10 @@ export default function Home() {
         public_token,
         metadata,
       });
-      if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
+      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
         setShowWebhookPanel(true);
+      } else {
+        setShowWebhookPanel(false);
       }
       return;
     }
@@ -3105,9 +3128,10 @@ export default function Home() {
         public_token,
         metadata
       });
-      // Show webhook panel whenever webhooks are configured (dev).
-      if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
+      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
         setShowWebhookPanel(true);
+      } else {
+        setShowWebhookPanel(false);
       }
     }
   }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess]);
@@ -4013,11 +4037,10 @@ export default function Home() {
       err: err || null,
       metadata
     });
-      // Show webhook panel whenever webhooks are configured (dev), except in Zap mode
-    if (!zapMode) {
-        if (WEBHOOKS_ENABLED && webhookUrlRef.current) {
-          setShowWebhookPanel(true);
-        }
+    if (!zapMode && WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
+      setShowWebhookPanel(true);
+    } else {
+      setShowWebhookPanel(false);
     }
   }, [multiItemLinkEnabled, zapMode]);
 
@@ -4042,7 +4065,9 @@ export default function Home() {
         }
         setShowEventLogs(true);
         setEventLogsPosition('right');
-        setShowWebhookPanel(WEBHOOKS_ENABLED && !!webhookUrlRef.current);
+        const layerProductId = effectiveProductIdRef.current;
+        const layerProductConfig = layerProductId ? getProductConfigById(layerProductId) : undefined;
+        setShowWebhookPanel(WEBHOOKS_ENABLED && !!webhookUrlRef.current && !!layerProductConfig?.requiresWebhook);
         setShowModal(false);
         try {
           (openRef.current as any)?.();
@@ -4157,6 +4182,32 @@ export default function Home() {
   const openRef = useRef(open);
   const submitRef = useRef(submit);
   const exitRef = useRef(exit);
+
+  // Track last user-visible (stable) modal state for API error "Back" fallback
+  const lastStableModalStateRef = useRef<typeof modalState>('loading');
+  const TRANSIENT_MODAL_STATES = new Set<typeof modalState>([
+    'loading',
+    'api-error',
+    'processing-accounts',
+    'processing-product',
+    'processing-user-create',
+    'creating-sandbox-item',
+    'tidying-up',
+    'layer-creating-session',
+    'layer-processing-session-get',
+    'layer-processing-user-update',
+    'layer-processing-check-report-create',
+    'layer-processing-identity-match',
+    'hosted-waiting',
+    'cashflow-updates-loading-items',
+    'cashflow-updates-subscribing',
+    'cashflow-updates-fetching-report',
+  ]);
+  useEffect(() => {
+    if (!TRANSIENT_MODAL_STATES.has(modalState)) {
+      lastStableModalStateRef.current = modalState;
+    }
+  }, [modalState]);
 
   useEffect(() => {
     modalStateRef.current = modalState;
@@ -6958,6 +7009,11 @@ export default function Home() {
             <div className="error-icon-large">⚠️</div>
             <h2>API Error Response</h2>
             {apiStatusCode && <span className="status-code">{apiStatusCode}</span>}
+            <button className="reset-icon-button" onClick={handleStartOver} title="Back to main menu" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
+              </svg>
+            </button>
           </div>
           <div className="account-data">
             <JsonHighlight 
@@ -6966,7 +7022,7 @@ export default function Home() {
             />
           </div>
           <div className="modal-button-row single-button">
-            <ArrowButton variant="red" direction="back" onClick={handleStartOver} />
+            <ArrowButton variant="red" direction="back" onClick={handleGoBackFromApiError} />
           </div>
         </div>
       );
@@ -7778,9 +7834,18 @@ export default function Home() {
         </button>
       )}
 
-      {/* Webhook Panel - Shows after onSuccess/onExit callbacks */}
+      {/* Webhook Panel - Shows after onSuccess/onExit callbacks (only for products that require webhooks) */}
       {WEBHOOKS_ENABLED && webhookUrl && (
-        <WebhookPanel webhooks={webhooks} visible={showWebhookPanel} />
+        <WebhookPanel
+          webhooks={webhooks}
+          visible={
+            showWebhookPanel &&
+            (() => {
+              const id = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+              return !!id && !!getProductConfigById(id)?.requiresWebhook;
+            })()
+          }
+        />
       )}
     </div>
   );
