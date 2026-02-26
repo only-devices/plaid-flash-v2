@@ -35,6 +35,8 @@ export interface ProductConfig {
   isCRA?: boolean; // CRA products use user_id/user_token instead of access_token
   requiresWebhook?: boolean; // Products that need a webhook URL (like CRA)
   layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
+  returnsPdf?: boolean; // When true, success step renders a PDF viewer instead of JSON
+  pdfResponseKey?: string; // Key in API response holding base64 PDF (default 'pdf')
 }
 
 export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
@@ -315,86 +317,206 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         layerTemplateId: 'template_jbeu3j65l0z7'
       },
       {
-        id: 'cra-income-insights',
-        name: 'Income Insights',
-        shortName: 'Income Insights',
-        products: ['cra_base_report', 'cra_income_insights'],
+        id: 'cra-underwriting',
+        name: 'Underwriting',
+        shortName: 'Underwriting',
+        products: [],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
         icon: '/icons/cra.png',
-        apiEndpoint: '/api/cra-income-insights-get',
-        apiTitle: '/cra/check_report/income_insights/get',
-        isCRA: true,
-        highlightKeys: ['income_insights'],
-        additionalLinkParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
-        },
-        additionalSandboxCreateParams: {
-          initial_products: ['cra_income_insights'],
-          options: {
-            override_username: "user_bank_income",
-            override_password: "{}",
+        children: [
+          {
+            id: 'cra-cashflow-insights',
+            name: 'Cashflow Insights',
+            shortName: 'Cashflow Insights',
+            products: ['cra_base_report', 'cra_cashflow_insights'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-cashflow-insights-get',
+            apiTitle: '/cra/check_report/cashflow_insights/get',
+            isCRA: true,
+            highlightKeys: ['cashflow_insights'],
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_phj5hyzpc3v5'
           }
-        },
-        requiresWebhook: true,
-        layerTemplateId: 'template_phj5hyzpc3v5'
+        ]
       },
       {
-        id: 'cra-partner-insights',
-        name: 'Partner Insights',
-        shortName: 'Partner Insights',
-        products: ['cra_base_report', 'cra_partner_insights'],
+        id: 'cra-home-lending',
+        name: 'Home Lending',
+        shortName: 'Home Lending',
+        products: [],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
         icon: '/icons/cra.png',
-        apiEndpoint: '/api/cra-partner-insights-get',
-        apiTitle: '/cra/check_report/partner_insights/get',
-        isCRA: true,
-        highlightKeys: ['partner_insights'],
-        additionalLinkParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
-        },
-        requiresWebhook: true,
-        layerTemplateId: 'template_phj5hyzpc3v5'
+        children: [
+          {
+            id: 'cra-home-lending-voa',
+            name: 'Home Lending VOA',
+            shortName: 'Home Lending VOA',
+            products: ['cra_base_report'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-home-lending-voa-get',
+            apiTitle: '/cra/check_report/verification/get',
+            isCRA: true,
+            additionalApiParams: {
+              reports_requested: ['voa'],
+            },
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+              gse_options: {
+                report_types: 'VOA',
+              },
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_jbeu3j65l0z7',
+            highlightKeys: []
+          },
+          {
+            id: 'cra-home-lending-voa-pdf',
+            name: 'Home Lending VOA PDF',
+            shortName: 'Home Lending VOA PDF',
+            products: ['cra_base_report'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-home-lending-voa-pdf-get',
+            apiTitle: '/cra/check_report/verification/pdf/get',
+            isCRA: true,
+            additionalApiParams: {
+              report_requested: 'voa',
+            },
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+              gse_options: {
+                report_types: 'VOA',
+              },
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_jbeu3j65l0z7',
+            returnsPdf: true
+          }
+        ]
       },
       {
-        id: 'cra-cashflow-insights',
-        name: 'Cashflow Insights',
-        shortName: 'Cashflow Insights',
-        products: ['cra_base_report', 'cra_cashflow_insights'],
+        id: 'cra-income',
+        name: 'Income',
+        shortName: 'Income',
+        products: [],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
         icon: '/icons/cra.png',
-        apiEndpoint: '/api/cra-cashflow-insights-get',
-        apiTitle: '/cra/check_report/cashflow_insights/get',
-        isCRA: true,
-        highlightKeys: ['cashflow_insights'],
-        additionalLinkParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
-        },
-        requiresWebhook: true,
-        layerTemplateId: 'template_phj5hyzpc3v5'
+        children: [
+          {
+            id: 'cra-income-insights',
+            name: 'Income Insights',
+            shortName: 'Income Insights',
+            products: ['cra_base_report', 'cra_income_insights'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-income-insights-get',
+            apiTitle: '/cra/check_report/income_insights/get',
+            isCRA: true,
+            highlightKeys: ['income_insights'],
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            additionalSandboxCreateParams: {
+              initial_products: ['cra_income_insights'],
+              options: {
+                override_username: "user_bank_income",
+                override_password: "{}",
+              }
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_phj5hyzpc3v5'
+          },
+          {
+            id: 'cra-income-insights-pdf',
+            name: 'Income Insights PDF',
+            shortName: 'Income Insights PDF',
+            products: ['cra_base_report', 'cra_income_insights'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-income-insights-pdf-get',
+            apiTitle: '/cra/check_report/pdf/get',
+            isCRA: true,
+            additionalApiParams: {
+              add_ons: ['cra_income_insights'],
+            },
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            additionalSandboxCreateParams: {
+              initial_products: ['cra_income_insights'],
+              options: {
+                override_username: "user_bank_income",
+                override_password: "{}",
+              }
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_phj5hyzpc3v5',
+            returnsPdf: true
+          }
+        ]
       },
       {
-        id: 'cra-cashflow-updates',
-        name: 'Cashflow Updates',
-        shortName: 'Cashflow Updates',
-        products: ['cra_base_report'],
+        id: 'cra-addon-modules',
+        name: 'Add-on Modules',
+        shortName: 'Add-on Modules',
+        products: [],
         required_if_supported: [],
         gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
         icon: '/icons/cra.png',
-        apiEndpoint: '/api/cra-cashflow-updates-get',
-        apiTitle: '/cra/monitoring_insights/get',
-        isCRA: true,
-        highlightKeys: [],
-        additionalApiParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
-        },
-        additionalLinkParams: {
-          consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
-        },
-        requiresWebhook: true,
-        layerTemplateId: 'template_phj5hyzpc3v5'
+        children: [
+          {
+            id: 'cra-cashflow-updates',
+            name: 'Cashflow Updates',
+            shortName: 'Cashflow Updates',
+            products: ['cra_base_report'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-cashflow-updates-get',
+            apiTitle: '/cra/monitoring_insights/get',
+            isCRA: true,
+            highlightKeys: [],
+            additionalApiParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_phj5hyzpc3v5'
+          },
+          {
+            id: 'cra-partner-insights',
+            name: 'Partner Insights',
+            shortName: 'Partner Insights',
+            products: ['cra_base_report', 'cra_partner_insights'],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
+            icon: '/icons/cra.png',
+            apiEndpoint: '/api/cra-partner-insights-get',
+            apiTitle: '/cra/check_report/partner_insights/get',
+            isCRA: true,
+            highlightKeys: ['partner_insights'],
+            additionalLinkParams: {
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+            },
+            requiresWebhook: true,
+            layerTemplateId: 'template_phj5hyzpc3v5'
+          }
+        ]
       },
       {
         id: 'link-upgrade-mode',

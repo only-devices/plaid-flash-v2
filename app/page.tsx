@@ -14,6 +14,7 @@ import WebhookPanel from '@/components/WebhookPanel';
 import MultiItemWebhookPanel from '@/components/MultiItemWebhookPanel';
 import CashflowUpdatesWebhookPanel, { type CashflowUpdatesWebhookEvent } from '@/components/CashflowUpdatesWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
+import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
 import { isWebhooksEnabledClient } from '@/lib/featureFlags';
 import { generateClientUserId } from '@/lib/generateClientUserId';
@@ -2330,8 +2331,23 @@ export default function Home() {
         throw new Error('Product API endpoint not configured');
       }
 
-      // Use the configOverride if provided, otherwise use productApiConfig state
-      const configToUse = configOverride || productApiConfig;
+      // Use configOverride if provided; otherwise prefer unsaved edits so that edits are always applied when proceeding
+      let configToUse = configOverride;
+      if (configToUse == null && editedProductApiConfig.trim()) {
+        try {
+          configToUse = JSON.parse(editedProductApiConfig);
+        } catch {
+          // Invalid JSON in editor; fall back to saved config
+        }
+      }
+      if (configToUse == null) {
+        configToUse = productApiConfig;
+      }
+      // Keep state in sync when we used unsaved edits
+      if (configOverride == null && editedProductApiConfig.trim() && configToUse != null) {
+        setProductApiConfig(configToUse);
+      }
+
       const tokenToUse = accessTokenRef.current || accessToken;
       const bodyToSend: any = { ...(configToUse || {}) };
       // Internal-only: always force the current session access_token for non-CRA.
@@ -7037,7 +7053,7 @@ export default function Home() {
                 </div>
                 <div className="modal-button-row two-buttons">
                   <ArrowButton variant="red" direction="back" onClick={handleGoBackFromProductApiPreview} />
-                  <ArrowButton variant="blue" onClick={() => handleProceedWithProductApi(productApiConfig)} />
+                  <ArrowButton variant="blue" onClick={() => handleProceedWithProductApi()} />
                 </div>
               </>
             ) : (
@@ -7185,7 +7201,12 @@ export default function Home() {
           )}
 
           <div className="account-data">
-            {isIncomeInsights && viewMode === 'visual' ? (
+            {productConfig?.returnsPdf ? (
+              <PdfResponseViewer
+                base64={productData[productConfig.pdfResponseKey ?? 'pdf']}
+                filename="income-insights.pdf"
+              />
+            ) : isIncomeInsights && viewMode === 'visual' ? (
               <IncomeInsightsVisualization data={productData} />
             ) : (
               <JsonHighlight 
@@ -7721,18 +7742,29 @@ export default function Home() {
                 </button>
               </div>
               <div className="account-data">
-                <JsonHighlight 
-                  data={productData} 
-                  highlightKeys={(() => {
-                    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-                    const productConfig = getProductConfigById(effectiveProductId!);
-                    return productConfig?.highlightKeys;
-                  })()}
-                  expandableCopy={{
-                    responseData: productData,
-                    accessToken: accessToken
-                  }}
-                />
+                {(() => {
+                  const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+                  const productConfig = getProductConfigById(effectiveProductId!);
+                  if (productConfig?.returnsPdf) {
+                    const pdfKey = productConfig.pdfResponseKey ?? 'pdf';
+                    return (
+                      <PdfResponseViewer
+                        base64={productData[pdfKey]}
+                        filename="income-insights.pdf"
+                      />
+                    );
+                  }
+                  return (
+                    <JsonHighlight 
+                      data={productData} 
+                      highlightKeys={productConfig?.highlightKeys}
+                      expandableCopy={{
+                        responseData: productData,
+                        accessToken: accessToken
+                      }}
+                    />
+                  );
+                })()}
               </div>
             </div>
           </div>
