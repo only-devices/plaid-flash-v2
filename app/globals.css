@@ -2964,6 +2964,11 @@ body:has(.webhook-panel-container):has(iframe[id^="plaid-link-iframe"]) .webhook
   transform: translate(-50%, -50%) scale(1);
 }
 
+/* Event logs above embedded Link overlay so onEvent panel stays visible */
+.event-logs-container.event-logs-above-embedded.visible {
+  z-index: 1003;
+}
+
 /* View Mode Tabs for CRA Income Insights */
 .view-mode-tabs {
   display: flex;

@@ -7638,8 +7638,8 @@ export default function Home() {
         </>
       )}
       
-      {/* Event Logs Modal - Shows side by side with Plaid Link */}
-      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''} ${isMultiItemFlowActive ? 'multiitem' : ''}`}>
+      {/* Event Logs Modal - Shows side by side with Plaid Link (above embedded overlay when embedded mode) */}
+      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} ${embeddedLinkActive ? 'event-logs-above-embedded' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''} ${isMultiItemFlowActive ? 'multiitem' : ''}`}>
         <div className="event-logs-modal">
           <div className="modal-success">
             <div className="success-header">
