@@ -12,6 +12,7 @@ Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows an
 - [Supported products](#supported-products)
 - [Settings toggles (feature flags)](#settings-toggles-feature-flags)
 - [Webhooks (dev-only in-app viewer)](#webhooks-dev-only-in-app-viewer)
+- [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 
 ## Advanced Mode (Docker)
@@ -166,6 +167,15 @@ When running locally in dev with `NGROK_AUTHTOKEN`, Plaid Flash starts an ngrok 
 - CRA report webhooks
 - Multi-item Link (Webhooks such as `ITEM_ADD_RESULT` and `SESSION_FINISHED`)
 - Hosted Link completion (`SESSION_FINISHED` webhook)
+
+## Testing
+
+```bash
+npm test            # Run all 148 tests
+npm run test:watch  # Re-run on file changes
+```
+
+Tests cover library utilities, API routes, and React components. All Plaid API calls are mocked — no credentials needed to run tests. See **[TESTING.md](TESTING.md)** for the full guide, including how to write tests for new routes and components.
 
 ## Troubleshooting
 
