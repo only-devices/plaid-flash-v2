@@ -3034,7 +3034,6 @@ export default function Home() {
     setShowModal(false);
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
-    setShowWebhookPanel(false);
 
     // Demo Mode bootstrap: no single product is selected yet; always exchange public_token and return to the demo menu.
     if (demoMode && !demoLinkCompleted) {
@@ -3956,7 +3955,6 @@ export default function Home() {
     setModalState('loading');
     setShowButton(true);
     setShowWelcome(false);
-    setShowWebhookPanel(false);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
     setHybridModeActive(false);
