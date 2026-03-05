@@ -34,6 +34,7 @@ export interface ProductConfig {
   icon?: string;
   isCRA?: boolean; // CRA products use user_id/user_token instead of access_token
   requiresWebhook?: boolean; // Products that need a webhook URL (like CRA)
+  sandboxProducts?: string[]; // Override `products` for /sandbox/public_token/create initial_products
   layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
   returnsPdf?: boolean; // When true, success step renders a PDF viewer instead of JSON
   pdfResponseKey?: string; // Key in API response holding base64 PDF (default 'pdf')
@@ -330,6 +331,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             name: 'Cashflow Insights',
             shortName: 'Cashflow Insights',
             products: ['cra_base_report', 'cra_cashflow_insights'],
+            sandboxProducts: ['cra_base_report'],
             required_if_supported: [],
             gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
             icon: '/icons/cra.png',
@@ -338,7 +340,12 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             isCRA: true,
             highlightKeys: ['cashflow_insights'],
             additionalLinkParams: {
-              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+              cra_options: {
+                cashflow_insights: {
+                  attributes_version: 'CFI1'
+                }
+              }
             },
             requiresWebhook: true,
             layerTemplateId: 'template_phj5hyzpc3v5'

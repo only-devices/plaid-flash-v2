@@ -1,14 +1,14 @@
-FROM node:20-alpine
+FROM node:20-alpine3.20
 
-# Install libc6-compat for Alpine compatibility (needed for native binaries like ngrok)
-RUN apk add --no-cache libc6-compat
+# Apply security updates and install runtime dependency
+RUN apk update && apk upgrade --no-cache && apk add --no-cache libc6-compat
 
 WORKDIR /app
 
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install ALL dependencies (including devDependencies for ngrok)
+# Install ALL dependencies (including devDependencies)
 RUN npm ci
 
 # Copy application code
@@ -20,5 +20,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Start in development mode to support ngrok and all dev features
+# Start in development mode
 CMD ["npm", "run", "dev"]

@@ -30,16 +30,13 @@ npx jest --selectProjects components
 __tests__/
 ├── lib/                          # Library/utility unit tests
 │   ├── productConfig.test.ts     # Product tree, config lookup, data integrity
-│   ├── webhookStore.test.ts      # Webhook add/get/clear, max limit, SSE broadcasting
 │   ├── generateClientUserId.test.ts  # ID generation format and uniqueness
-│   ├── featureFlags.test.ts      # Environment-based feature flag logic
 │   └── server/
 │       └── plaidCredentials.test.ts  # Credential switching, cookie parsing, client creation
 ├── api/                          # API route unit tests
 │   ├── auth-get.test.ts          # Standard product API pattern
 │   ├── create-link-token.test.ts # Link token creation with all config variations
 │   ├── exchange-public-token.test.ts # Token exchange and error handling
-│   ├── webhook.test.ts           # Webhook receiver (feature flag gating, always-200 behavior)
 │   ├── credentials-mode.test.ts  # GET/POST credential state, cookie management
 │   └── user-create.test.ts       # CRA user creation (user_id and legacy user_token flows)
 ├── utils/
@@ -67,8 +64,6 @@ The Jest config (`jest.config.ts`) defines two projects:
 
 **Library tests** check that utility functions produce correct outputs:
 - Product config lookups find the right products at all tree depths
-- Webhook store respects the 50-event max, broadcasts to SSE clients, and cleans up disconnected clients
-- Feature flags respond correctly to environment variable combinations
 - Credential management correctly reads cookies and selects primary vs. alt keys
 
 **API route tests** verify request handling end-to-end within each route:

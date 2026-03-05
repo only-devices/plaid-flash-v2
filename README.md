@@ -11,7 +11,7 @@ Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows an
 - [How to use the app](#how-to-use-the-app)
 - [Supported products](#supported-products)
 - [Settings toggles (feature flags)](#settings-toggles-feature-flags)
-- [Webhooks (dev-only in-app viewer)](#webhooks-dev-only-in-app-viewer)
+- [Webhooks](#webhooks)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 
@@ -22,7 +22,7 @@ Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows an
 - A Plaid account + API keys: `PLAID_CLIENT_ID` and `PLAID_SECRET` (only Plaid Sandbox is supported).
 - A Link customization named **`flash`** in the Plaid Dashboard.
 
-This repo supports running in Docker for a consistent environment (and to enable dev-only webhook features if you provide `NGROK_AUTHTOKEN`).
+This repo supports running in Docker for a consistent local development environment.
 
 ```bash
 cp .env.example .env  # <- Update .env with your credentials
@@ -51,7 +51,6 @@ docker compose down -v # Stops and removes Docker container
 ### Optional
 
 - **`ALT_PLAID_CLIENT_ID`**, **`ALT_PLAID_SECRET`**: enable the **Use ALT_PLAID_CLIENT_ID** toggle to switch credentials per session.
-- **`NGROK_AUTHTOKEN`** (local dev-only): enables the in-app webhook viewer/stream while running locally.
 
 ## How to use the app
 
@@ -70,7 +69,7 @@ CRA products use a **user-based** flow:
 1. `/user/create` preview + create
 2. `/link/token/create` includes `user_id` or `user_token` (based on the **Use legacy user_token** toggle)
 3. Complete Link
-4. Run CRA product APIs (and watch CRA webhooks in the viewer in dev)
+4. Run CRA product APIs (paste webhook payloads when prompted)
 
 ### Hosted Link flow
 
@@ -85,8 +84,8 @@ When **Hosted Link** is enabled:
 When **Layer** is enabled, Plaid Flash uses **Layer + Link** (behind the scenes) instead of calling `/link/token/create` directly:
 
 - **Prereqs**: you must set a **Webhook URL** in Settings (Layer relies on webhooks).
-- The app runs `/user/create`, then `/session/token/create` (using the selected product’s `template_id`).
-- You’ll be prompted to `submit({ phone_number })`. If `LAYER_NOT_AVAILABLE` occurs, you can `submit({ date_of_birth })` for Extended Autofill.
+- The app runs `/user/create`, then `/session/token/create` (using the selected product's `template_id`).
+- You'll be prompted to `submit({ phone_number })`. If `LAYER_NOT_AVAILABLE` occurs, you can `submit({ date_of_birth })` for Extended Autofill.
 - After Layer is ready, Link opens and returns `public_token` via `onSuccess` (then the app continues with the normal flow).
 - **Layer + CRA**: after Link completes, the app calls `/user_account/session/get`, then **previews `/user/update` (editable)** to persist identity, then calls `/cra/check_report/create` and waits for a `USER_CHECK_REPORT_READY` webhook before running the CRA `/get` endpoint.
 
@@ -104,7 +103,7 @@ Update Mode does **not** run downstream product APIs and does **not** automatica
 Upgrade Mode is a Plaid flow that lets you add Plaid CRA functionality to existing non-CRA items, and call CRA endpoints once the upgrade is complete. You need only an existing access_token to get started:
 
 1. Preview + run `/user/create` (supports `user_id` or legacy `user_token` based on the **Use legacy user_token** toggle)
-2. Preview `/link/token/create` (you’ll paste the `access_token` and can edit products/options)
+2. Preview `/link/token/create` (you'll paste the `access_token` and can edit products/options)
 3. Complete Link, wait for `CHECK_REPORT / USER_CHECK_REPORT_READY`, then run the CRA `/get` endpoint
 
 ## Supported products
@@ -160,18 +159,14 @@ The **Settings** modal includes these toggles:
 - **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received.
 - **Remove items and users automatically** (default on): when you finish and return to the menu, automatically calls `/item/remove` (non-CRA) or `/user/remove` (CRA/hybrid). When off, deletion is skipped.
 
-## Webhooks (dev-only in-app viewer)
+## Webhooks
 
-When running locally in dev with `NGROK_AUTHTOKEN`, Plaid Flash starts an ngrok tunnel and exposes an in-app webhook viewer/stream. This is used for:
-
-- CRA report webhooks
-- Multi-item Link (Webhooks such as `ITEM_ADD_RESULT` and `SESSION_FINISHED`)
-- Hosted Link completion (`SESSION_FINISHED` webhook)
+Several features (CRA, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks. When the app needs a webhook payload (e.g. `USER_CHECK_REPORT_READY` or `SESSION_FINISHED`), it will prompt you to paste the JSON payload.
 
 ## Testing
 
 ```bash
-npm test            # Run all 148 tests
+npm test            # Run all tests
 npm run test:watch  # Re-run on file changes
 ```
 
@@ -179,15 +174,15 @@ Tests cover library utilities, API routes, and React components. All Plaid API c
 
 ## Troubleshooting
 
-### No webhook events appear
+### Webhook-dependent features are not working
 
-- Confirm you’re running locally in dev.
-- Confirm `NGROK_AUTHTOKEN` is set in `.env` (exact casing).
+- Confirm you have set a **Webhook URL** in the Settings modal.
 - Confirm the Link token config includes a `webhook` URL (the UI preview should show it).
+- Confirm your webhook endpoint is publicly reachable and can receive Plaid webhooks.
 
-### Hosted Link doesn’t open
+### Hosted Link doesn't open
 
-- Some browsers block popups; try the UI’s “Open Hosted Link” button if present.
+- Some browsers block popups; try the UI's "Open Hosted Link" button if present.
 
 ### ALT credentials toggle is disabled
 

@@ -10,18 +10,12 @@ import JsonHighlight from '@/components/JsonHighlight';
 import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
-import WebhookPanel from '@/components/WebhookPanel';
-import MultiItemWebhookPanel from '@/components/MultiItemWebhookPanel';
 import CashflowUpdatesWebhookPanel, { type CashflowUpdatesWebhookEvent } from '@/components/CashflowUpdatesWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
-import { isWebhooksEnabledClient } from '@/lib/featureFlags';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 
-// Feature flag for webhooks (development-only)
-const WEBHOOKS_ENABLED = isWebhooksEnabledClient();
-const IS_DEV = process.env.NODE_ENV === 'development';
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
 const DEFAULT_LAYER_TEMPLATE_ID = 'template_5xk9wmaarmlp';
 const DEFAULT_LAYER_PHONE_NUMBER = '+14155550011';
@@ -193,17 +187,9 @@ export default function Home() {
   const [editedSandboxConfig, setEditedSandboxConfig] = useState('');
   const [sandboxConfigError, setSandboxConfigError] = useState<string | null>(null);
 
-  // Webhook state
-  const [webhooks, setWebhooks] = useState<any[]>([]);
-  const [showWebhookPanel, setShowWebhookPanel] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+  // Webhook URL state (user-configured in Settings)
   const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
-  const webhookUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    webhookUrlRef.current = webhookUrl;
-  }, [webhookUrl]);
 
   useEffect(() => {
     accessTokenRef.current = accessToken;
@@ -279,8 +265,8 @@ export default function Home() {
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
   const isMultiItemFlowActive = multiItemLinkEnabled && !effectiveProductConfig?.isCRA;
-  const effectiveWebhookConfigUrl = IS_DEV ? webhookUrl : (webhookUrlOverride.trim() || null);
-  const effectiveWebhookConfigUrlForSettings = IS_DEV ? webhookUrl : (tempWebhookUrlOverride.trim() || null);
+  const effectiveWebhookConfigUrl = webhookUrlOverride.trim() || null;
+  const effectiveWebhookConfigUrlForSettings = tempWebhookUrlOverride.trim() || null;
 
   // Some callbacks (e.g. Link's onSuccess/onExit) may be registered once; keep selected product in a ref.
   const effectiveProductIdRef = useRef<string | null>(null);
@@ -300,7 +286,7 @@ export default function Home() {
     useAltCredentials ||
     !includePhoneNumber ||
     bypassLink ||
-    (!IS_DEV && webhookUrlOverride.trim().length > 0);
+    webhookUrlOverride.trim().length > 0;
 
   const leafProductConfigs = useMemo(() => {
     const leafs: ProductConfig[] = [];
@@ -450,9 +436,8 @@ export default function Home() {
     }
   }, [linkEvents]);
 
-  // Production (Vercel): load saved webhook URL override from localStorage
+  // Load saved webhook URL from localStorage
   useEffect(() => {
-    if (IS_DEV) return;
     try {
       const saved = localStorage.getItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY);
       if (saved) {
@@ -463,12 +448,9 @@ export default function Home() {
     }
   }, []);
 
-  // SSE connection for real-time webhook updates
+  // Load credential mode (cookie-backed) + availability
   useEffect(() => {
-    let eventSource: EventSource | null = null;
-
-    const initWebhooks = async () => {
-      // Load credential mode (cookie-backed) + availability
+    const loadCredentials = async () => {
       try {
         const response = await fetch('/api/credentials-mode');
         const data = await response.json();
@@ -477,93 +459,9 @@ export default function Home() {
       } catch (error) {
         console.error('Error loading credential mode:', error);
       }
-
-      // Only initialize webhook URL + SSE stream when feature is enabled (dev)
-      if (!WEBHOOKS_ENABLED) {
-        return;
-      }
-
-      // Fetch webhook URL on mount
-      try {
-        const response = await fetch('/api/webhook-url');
-        const data = await response.json();
-        if (data.webhookUrl) {
-          setWebhookUrl(data.webhookUrl);
-          console.log('Webhook URL:', data.webhookUrl);
-        } else if (data.message) {
-          console.log('Webhook status:', data.message);
-        }
-      } catch (error) {
-        console.error('Error fetching webhook URL:', error);
-      }
-
-      // Connect to SSE stream for webhook updates
-      try {
-        eventSource = new EventSource('/api/webhooks-stream');
-        
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === 'connected') {
-              // Initial connection - load existing webhooks
-              if (data.webhooks && data.webhooks.length > 0) {
-                setWebhooks(data.webhooks);
-              }
-            } else if (data.type === 'heartbeat') {
-              // Heartbeat - ignore
-            } else {
-              // New webhook received
-              setWebhooks(prev => [data, ...prev]);
-            }
-          } catch (error) {
-            console.error('Error parsing SSE data:', error);
-          }
-        };
-
-        eventSource.onerror = (error) => {
-          console.error('SSE connection error:', error);
-          // EventSource will automatically try to reconnect
-        };
-      } catch (error) {
-        console.error('Error connecting to SSE:', error);
-      }
     };
-
-    initWebhooks();
-
-    return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
+    loadCredentials();
   }, []);
-
-  // Layer + CRA: if the check report fails while we're waiting, surface the failure immediately.
-  useEffect(() => {
-    if (hostedWaitingMode !== 'cra_check_report') return;
-    if (!craCheckReportExpectedUserId) return;
-    if (!Array.isArray(webhooks) || webhooks.length === 0) return;
-
-    const failed = webhooks.find((w: any) => {
-      const t = w?.webhook_type ?? w?.payload?.webhook_type;
-      const c = w?.webhook_code ?? w?.payload?.webhook_code;
-      if (t !== 'CHECK_REPORT') return false;
-      if (c !== 'USER_CHECK_REPORT_FAILED') return false;
-      const u = w?.payload?.user_id ?? w?.user_id;
-      return !u || u === craCheckReportExpectedUserId;
-    });
-
-    if (!failed) return;
-
-    setErrorData(failed?.payload ?? failed);
-    setApiStatusCode(200);
-    setHostedWaitingMode('hosted_link');
-    setCraCheckReportExpectedUserId(null);
-    setCraCheckReportManualReady(false);
-    setModalState('api-error');
-    setShowModal(true);
-  }, [hostedWaitingMode, craCheckReportExpectedUserId, webhooks]);
 
   const fetchLinkToken = async (productId: string) => {
     try {
@@ -622,7 +520,7 @@ export default function Home() {
           setCraCheckReportExpectedUserId(null);
           setCraCheckReportManualReady(false);
           setShowEventLogs(false);
-          setShowWebhookPanel(false);
+    
           setModalState('hosted-waiting');
           setShowModal(true);
           window.open(data.hosted_link_url, '_blank', 'noopener,noreferrer');
@@ -746,13 +644,13 @@ export default function Home() {
         setIsEditingLayerDobSubmitConfig(false);
         setEditedLayerDobSubmitConfig(JSON.stringify({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH }, null, 2));
         setLayerDobSubmitConfigError(null);
-        setWebhooks([]);
+  
         setLinkEvents([]);
 
         // Don't show event/webhook side panels until Link is actually opened (LAYER_READY).
         setShowEventLogs(false);
         setEventLogsPosition('right');
-        setShowWebhookPanel(false);
+  
 
         setShowModal(true);
         setShowWelcome(false);
@@ -816,7 +714,7 @@ export default function Home() {
         setShowWelcome(false);
       }
     },
-    [effectiveWebhookConfigUrl, useAltCredentials, webhookUrl]
+    [effectiveWebhookConfigUrl, useAltCredentials]
   );
 
   const runNonCraFlowWithAccessToken = useCallback(
@@ -984,7 +882,7 @@ export default function Home() {
     if (bypassLink) {
       const sandboxFullConfig: any = {
         institution_id: 'ins_109511',
-        initial_products: productConfig.products,
+        initial_products: productConfig.sandboxProducts || productConfig.products,
         options: {}
       };
 
@@ -1395,7 +1293,7 @@ export default function Home() {
     if (bypassLink) {
       const sandboxFullConfig: any = {
         institution_id: 'ins_109511',
-        initial_products: productConfig.products,
+        initial_products: productConfig.sandboxProducts || productConfig.products,
         options: {}
       };
 
@@ -1668,7 +1566,7 @@ export default function Home() {
       setHostedLinkManualPayload('');
       setHostedLinkManualParseError(null);
       setHostedLinkExtractedPublicTokens([]);
-      setWebhooks([]);
+
       setCraLayerPendingAfterUserUpdate(null);
       setModalState('hosted-waiting');
       setShowModal(true);
@@ -1842,7 +1740,7 @@ export default function Home() {
         setCraCheckReportExpectedUserId(null);
         setCraCheckReportManualReady(false);
         setShowEventLogs(false);
-        setShowWebhookPanel(false);
+  
         setModalState('hosted-waiting');
         setShowModal(true);
       }
@@ -1880,7 +1778,7 @@ export default function Home() {
           setCraCheckReportExpectedUserId(null);
           setCraCheckReportManualReady(false);
           setShowEventLogs(false);
-          setShowWebhookPanel(false);
+    
           setModalState('hosted-waiting');
           setShowModal(true);
 
@@ -2022,7 +1920,7 @@ export default function Home() {
         setHostedLinkManualParseError(null);
         setHostedLinkExtractedPublicTokens([]);
         setShowEventLogs(false);
-        setShowWebhookPanel(false);
+  
         setModalState('hosted-waiting');
         setShowModal(true);
       }
@@ -2103,7 +2001,7 @@ export default function Home() {
             setHostedLinkManualParseError(null);
             setHostedLinkExtractedPublicTokens([]);
             setShowEventLogs(false);
-            setShowWebhookPanel(false);
+      
             setModalState('hosted-waiting');
             setShowModal(true);
             try {
@@ -2506,19 +2404,17 @@ export default function Home() {
     setIncludePhoneNumber(tempIncludePhoneNumber);
     setBypassLink(tempBypassLink);
 
-    // Persist production webhook URL override (dev continues to use ngrok)
+    // Persist webhook URL to localStorage
     const trimmedWebhookOverride = tempWebhookUrlOverride.trim();
     setWebhookUrlOverride(trimmedWebhookOverride);
-    if (!IS_DEV) {
-      try {
-        if (trimmedWebhookOverride) {
-          localStorage.setItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY, trimmedWebhookOverride);
-        } else {
-          localStorage.removeItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY);
-        }
-      } catch (e) {
-        // Ignore storage errors (privacy mode, etc.)
+    try {
+      if (trimmedWebhookOverride) {
+        localStorage.setItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY, trimmedWebhookOverride);
+      } else {
+        localStorage.removeItem(WEBHOOK_URL_OVERRIDE_STORAGE_KEY);
       }
+    } catch (e) {
+      // Ignore storage errors (privacy mode, etc.)
     }
     
     // Close settings modal
@@ -2890,7 +2786,7 @@ export default function Home() {
             setCashflowUpdatesManualPayload('');
             setCashflowUpdatesManualParseError(null);
             setCashflowUpdatesManualWebhooks([]);
-            setWebhooks([]);
+      
 
             setModalState('cashflow-updates-loading-items');
             setShowModal(true);
@@ -3088,14 +2984,14 @@ export default function Home() {
         public_token,
         metadata,
       });
-      setShowWebhookPanel(false);
+
       return;
     }
 
     // Multi-item Link: do not show onSuccess screen for non-CRA products (tokens come from LINK webhooks)
     const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
     if (isMultiItemNonCra) {
-      setShowWebhookPanel(false);
+
       return;
     }
 
@@ -3108,11 +3004,6 @@ export default function Home() {
         public_token,
         metadata,
       });
-      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
-        setShowWebhookPanel(true);
-      } else {
-        setShowWebhookPanel(false);
-      }
       return;
     }
 
@@ -3128,11 +3019,6 @@ export default function Home() {
         public_token,
         metadata
       });
-      if (WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
-        setShowWebhookPanel(true);
-      } else {
-        setShowWebhookPanel(false);
-      }
     }
   }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess]);
 
@@ -3148,7 +3034,6 @@ export default function Home() {
     setShowModal(false);
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
-    setShowWebhookPanel(false);
 
     // Demo Mode bootstrap: no single product is selected yet; always exchange public_token and return to the demo menu.
     if (demoMode && !demoLinkCompleted) {
@@ -3211,31 +3096,15 @@ export default function Home() {
     // Link-only: Upgrade Mode behaves like CRA post-Link (wait for USER_CHECK_REPORT_READY, then call one CRA endpoint).
     if (effectiveProductId === 'link-upgrade-mode') {
       const expectedUserId = userId || null;
-      const hasReadyWebhook = (webhooks || []).some((w: any) => {
-        const webhookType = w.webhook_type ?? w.payload?.webhook_type;
-        const webhookCode = w.webhook_code ?? w.payload?.webhook_code;
-        if (webhookType !== 'CHECK_REPORT') return false;
-        if (webhookCode !== 'USER_CHECK_REPORT_READY') return false;
-        if (!expectedUserId) return true;
-        const payloadUserId = w.payload?.user_id ?? w.payload?.user?.user_id ?? w.user_id;
-        return !payloadUserId || payloadUserId === expectedUserId;
-      });
-
-      if (!hasReadyWebhook) {
-        // Reuse hosted-waiting (dev: shows MultiItemWebhookPanel in check_report mode; prod: manual paste)
-        setHostedWaitingMode('cra_check_report');
-        setCraCheckReportExpectedUserId(expectedUserId);
-        setCraCheckReportManualReady(false);
-        setHostedLinkUrl(null);
-        setHostedLinkManualPayload('');
-        setHostedLinkManualParseError(null);
-        setHostedLinkExtractedPublicTokens([]);
-        setModalState('hosted-waiting');
-        setShowModal(true);
-        return;
-      }
-
-      handleUpgradeModeReportReadyForward();
+      setHostedWaitingMode('cra_check_report');
+      setCraCheckReportExpectedUserId(expectedUserId);
+      setCraCheckReportManualReady(false);
+      setHostedLinkUrl(null);
+      setHostedLinkManualPayload('');
+      setHostedLinkManualParseError(null);
+      setHostedLinkExtractedPublicTokens([]);
+      setModalState('hosted-waiting');
+      setShowModal(true);
       return;
     }
     
@@ -3452,7 +3321,7 @@ export default function Home() {
           setCashflowUpdatesManualPayload('');
           setCashflowUpdatesManualParseError(null);
           setCashflowUpdatesManualWebhooks([]);
-          setWebhooks([]);
+    
 
           setModalState('cashflow-updates-loading-items');
           setShowModal(true);
@@ -3856,47 +3725,17 @@ export default function Home() {
         throw new Error('Product API endpoint not configured');
       }
 
-      // CRA products are user-based and may require waiting for USER_CHECK_REPORT_READY
+      // CRA products are user-based and require waiting for USER_CHECK_REPORT_READY
       if (productConfig.isCRA) {
         const expectedUserId = userId || null;
-        const hasReadyWebhook = (webhooks || []).some((w: any) => {
-          const webhookType = w.webhook_type ?? w.payload?.webhook_type;
-          const webhookCode = w.webhook_code ?? w.payload?.webhook_code;
-          if (webhookType !== 'CHECK_REPORT') return false;
-          if (webhookCode !== 'USER_CHECK_REPORT_READY') return false;
-          if (!expectedUserId) return true;
-          const payloadUserId = w.payload?.user_id ?? w.payload?.user?.user_id ?? w.user_id;
-          return !payloadUserId || payloadUserId === expectedUserId;
-        });
-
-        if (!hasReadyWebhook) {
-          // Reuse hosted-waiting (dev: shows MultiItemWebhookPanel in check_report mode; prod: manual paste)
-          setHostedWaitingMode('cra_check_report');
-          setCraCheckReportExpectedUserId(expectedUserId);
-          setCraCheckReportManualReady(false);
-          setHostedLinkUrl(null);
-          setHostedLinkManualPayload('');
-          setHostedLinkManualParseError(null);
-          setHostedLinkExtractedPublicTokens([]);
-          setModalState('hosted-waiting');
-          setShowModal(true);
-          return;
-        }
-
-        const baseParams: any = {};
-        if (usedUserToken && userToken) {
-          baseParams.user_token = userToken;
-        } else if (userId) {
-          baseParams.user_id = userId;
-        } else if (userToken) {
-          baseParams.user_token = userToken;
-        } else {
-          throw new Error('Missing user_id/user_token for CRA product call');
-        }
-
-        const requestBody = buildProductRequestBody(baseParams, productConfig);
-        setProductApiConfig(requestBody);
-        setModalState('preview-product-api');
+        setHostedWaitingMode('cra_check_report');
+        setCraCheckReportExpectedUserId(expectedUserId);
+        setCraCheckReportManualReady(false);
+        setHostedLinkUrl(null);
+        setHostedLinkManualPayload('');
+        setHostedLinkManualParseError(null);
+        setHostedLinkExtractedPublicTokens([]);
+        setModalState('hosted-waiting');
         setShowModal(true);
         return;
       }
@@ -3994,7 +3833,7 @@ export default function Home() {
         err: err || null,
         metadata,
       });
-      setShowWebhookPanel(false);
+
       return;
     }
 
@@ -4010,7 +3849,7 @@ export default function Home() {
       setModalState('loading');
       setShowButton(false);
       setShowWelcome(false);
-      setShowWebhookPanel(false);
+
       setAccountsData(null);
       setProductData(null);
       setAccessToken(null);
@@ -4037,11 +3876,6 @@ export default function Home() {
       err: err || null,
       metadata
     });
-    if (!zapMode && WEBHOOKS_ENABLED && webhookUrlRef.current && productConfig?.requiresWebhook) {
-      setShowWebhookPanel(true);
-    } else {
-      setShowWebhookPanel(false);
-    }
   }, [multiItemLinkEnabled, zapMode]);
 
   const onEvent = useCallback((eventName: string, metadata: any) => {
@@ -4067,7 +3901,6 @@ export default function Home() {
         setEventLogsPosition('right');
         const layerProductId = effectiveProductIdRef.current;
         const layerProductConfig = layerProductId ? getProductConfigById(layerProductId) : undefined;
-        setShowWebhookPanel(WEBHOOKS_ENABLED && !!webhookUrlRef.current && !!layerProductConfig?.requiresWebhook);
         setShowModal(false);
         try {
           (openRef.current as any)?.();
@@ -4078,7 +3911,7 @@ export default function Home() {
         // Extended Autofill failed after submitting date_of_birth; do not open Link.
         layerEligibilityBlockedRef.current = true;
         setShowEventLogs(false);
-        setShowWebhookPanel(false);
+  
         setErrorData({
           error: 'LAYER_AUTOFILL_NOT_AVAILABLE',
           message:
@@ -4096,7 +3929,7 @@ export default function Home() {
           // ignore
         }
         setShowEventLogs(false);
-        setShowWebhookPanel(false);
+  
         layerEligibilityBlockedRef.current = true;
         // Prevent a near-simultaneous LAYER_READY from opening Link before React state updates.
         modalStateRef.current = 'layer-dob-submit';
@@ -4122,7 +3955,6 @@ export default function Home() {
     setModalState('loading');
     setShowButton(true);
     setShowWelcome(false);
-    setShowWebhookPanel(false);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
     setHybridModeActive(false);
@@ -4611,8 +4443,8 @@ export default function Home() {
       setUserCreateConfigError(null);
 
       // Reset webhook panel (but keep SSE connection open)
-      setShowWebhookPanel(false);
-      setWebhooks([]);
+
+
 
       // Reset embedded Link state
       setEmbeddedLinkActive(false);
@@ -4717,10 +4549,6 @@ export default function Home() {
     setIsEditingUserCreateConfig(false);
     setEditedUserCreateConfig('');
     setUserCreateConfigError(null);
-    
-    // Reset webhook panel (but keep SSE connection open)
-    setShowWebhookPanel(false);
-    setWebhooks([]);
 
     // Reset embedded Link state
     setEmbeddedLinkActive(false);
@@ -4808,10 +4636,6 @@ export default function Home() {
     setLayerPendingProductId(null);
     setLayerDateOfBirth(DEFAULT_LAYER_DATE_OF_BIRTH);
     setLayerIdentityMatchData(null);
-
-    // Reset webhook panel (but keep SSE connection open)
-    setShowWebhookPanel(false);
-    setWebhooks([]);
 
     // Reset embedded Link state
     setEmbeddedLinkActive(false);
@@ -5010,7 +4834,7 @@ export default function Home() {
 
       // Hide onEvent + webhook viewers and show processing state
       setShowEventLogs(false);
-      setShowWebhookPanel(false);
+
       setModalState('processing-accounts');
       setShowModal(true);
 
@@ -5679,9 +5503,8 @@ export default function Home() {
   const cashflowUpdatesSelectedItem = cashflowUpdatesItems[cashflowUpdatesSelectedIndex] || null;
 
   const cashflowUpdatesCombinedEvents = useMemo(() => {
-    const devEvents = Array.isArray(webhooks) ? (webhooks as CashflowUpdatesWebhookEvent[]) : [];
-    return [...cashflowUpdatesManualWebhooks, ...devEvents];
-  }, [cashflowUpdatesManualWebhooks, webhooks]);
+    return [...cashflowUpdatesManualWebhooks];
+  }, [cashflowUpdatesManualWebhooks]);
 
   const cashflowUpdatesQualifyingEvents = useMemo(() => {
     return cashflowUpdatesCombinedEvents
@@ -5764,7 +5587,6 @@ export default function Home() {
     }
 
     // Clear old events so Forward gating is for this subscription.
-    setWebhooks([]);
     setCashflowUpdatesManualWebhooks([]);
     setCashflowUpdatesManualParseError(null);
 
@@ -6713,27 +6535,7 @@ export default function Home() {
             </div>
           )}
 
-          {IS_DEV ? (
-            <MultiItemWebhookPanel
-              enabled={true}
-              linkToken={linkToken}
-              webhooks={webhooks}
-              onForward={(tokens) =>
-                isCraReportWaiting
-                  ? isUpgradeMode
-                    ? handleUpgradeModeReportReadyForward()
-                    : handleCraLayerReportReadyForward()
-                  : isUpdateMode
-                    ? returnToProductMenuNoRemove()
-                    : handleHostedLinkForward(tokens)
-              }
-              title="Webhooks"
-              allowForwardWithoutTokens={allowForwardWithoutTokens}
-              mode={isCraReportWaiting ? 'check_report' : 'link'}
-              expectedUserId={isCraReportWaiting ? craCheckReportExpectedUserId : null}
-            />
-          ) : (
-            <>
+          <>
               <div className="account-data">
                 <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
                   {isCraReportWaiting ? (
@@ -6847,8 +6649,7 @@ export default function Home() {
                   }
                 />
               </div>
-            </>
-          )}
+          </>
         </div>
       );
     }
@@ -6914,7 +6715,7 @@ export default function Home() {
     }
 
     if (modalState === 'cashflow-updates-webhooks') {
-      const allowManualPaste = !IS_DEV;
+      const allowManualPaste = true;
       const selected = cashflowUpdatesSelectedItem;
 
       return (
@@ -7038,9 +6839,6 @@ export default function Home() {
       // Extract endpoint name from apiEndpoint (e.g., "/api/transactions-get" -> "/transactions/get")
       const apiName = productConfig?.apiTitle || '';
       
-      // Check if we should show webhook panel (CRA products in Bypass Link mode)
-      const showEmbeddedWebhookPanel = WEBHOOKS_ENABLED && webhookUrl && isCRA && bypassLink;
-      
       // Remove useAltCredentials from display (it's internal, not sent to Plaid)
       const { useAltCredentials: _, ...displayConfig } = productApiConfig;
       
@@ -7145,51 +6943,6 @@ export default function Home() {
             )}
           </div>
           
-          {/* Embedded Webhook Panel for CRA Bypass Link */}
-          {showEmbeddedWebhookPanel && (
-            <div className="modal-success" style={{ marginTop: '20px' }}>
-              <div className="webhook-panel-embedded">
-                <div className="webhook-panel-header">
-                  <h3>Webhooks</h3>
-                  {webhooks.length > 0 && (
-                    <span className="webhook-count">{webhooks.length}</span>
-                  )}
-                </div>
-                
-                <div className="webhook-panel-content">
-                  {webhooks.length > 0 ? (
-                    <div className="webhook-scroll">
-                      {webhooks.map((webhook, index) => (
-                        <div key={webhook.id} className={`webhook-item ${index % 2 === 0 ? 'even' : 'odd'}`}>
-                          <div className="webhook-item-header">
-                            <span className="webhook-time">
-                              {new Date(webhook.timestamp).toLocaleTimeString('en-US', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: false
-                              })}
-                            </span>
-                            <span className="webhook-type">{webhook.webhook_type}</span>
-                            <span className="webhook-code">{webhook.webhook_code}</span>
-                          </div>
-                          <div className="webhook-payload">
-                            <JsonHighlight data={webhook.payload} showCopyButton={false} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="webhook-placeholder">
-                      <pre className="code-block">
-                        <code>... waiting for webhooks</code>
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </>
       );
     }
@@ -7444,9 +7197,7 @@ export default function Home() {
                   disabled={!effectiveWebhookConfigUrlForSettings || tempEmbeddedMode || tempHostedLinkEnabled || tempMultiItemLinkEnabled || tempBypassLink}
                   tooltip={
                     !effectiveWebhookConfigUrlForSettings
-                      ? (IS_DEV
-                          ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
-                          : 'Set your webhook URL below to enable Layer')
+                      ? 'Set your webhook URL below to enable Layer'
                       : tempEmbeddedMode
                         ? 'Disable Embedded Link to use Layer'
                         : tempHostedLinkEnabled
@@ -7501,9 +7252,7 @@ export default function Home() {
                       : tempBypassLink
                         ? 'Disable Bypass Link to use Multi-item Link'
                         : !effectiveWebhookConfigUrlForSettings
-                          ? (IS_DEV
-                              ? 'Webhook URL not active (configure NGROK_AUTHTOKEN)'
-                              : 'Set your webhook URL below to enable Multi-item Link')
+                          ? 'Set your webhook URL below to enable Multi-item Link'
                           : undefined
                     }
                   />
@@ -7551,18 +7300,14 @@ export default function Home() {
           <div className="settings-info-row">
             <span className="settings-info-label">Webhook URL</span>
             <span className="settings-info-value">
-              {IS_DEV ? (
-                webhookUrl ? webhookUrl : 'Not active'
-              ) : (
-                <input
-                  className="settings-webhook-url-input"
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://your-public-webhook-url"
-                  value={tempWebhookUrlOverride}
-                  onChange={(e) => setTempWebhookUrlOverride(e.target.value)}
-                />
-              )}
+              <input
+                className="settings-webhook-url-input"
+                type="url"
+                inputMode="url"
+                placeholder="https://your-public-webhook-url"
+                value={tempWebhookUrlOverride}
+                onChange={(e) => setTempWebhookUrlOverride(e.target.value)}
+              />
             </span>
           </div>
           <div className="button-row">
@@ -7736,13 +7481,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Multi-item Link webhook viewer (inline, under onEvent logs) */}
-        <MultiItemWebhookPanel
-          enabled={isMultiItemFlowActive}
-          linkToken={linkToken}
-          webhooks={webhooks}
-          onForward={handleMultiItemForward}
-        />
       </div>
       
       {/* Callback Modal Container - Shows on the right when event logs slide left */}
@@ -7834,19 +7572,6 @@ export default function Home() {
         </button>
       )}
 
-      {/* Webhook Panel - Shows after onSuccess/onExit callbacks (only for products that require webhooks) */}
-      {WEBHOOKS_ENABLED && webhookUrl && (
-        <WebhookPanel
-          webhooks={webhooks}
-          visible={
-            showWebhookPanel &&
-            (() => {
-              const id = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-              return !!id && !!getProductConfigById(id)?.requiresWebhook;
-            })()
-          }
-        />
-      )}
     </div>
   );
 }
