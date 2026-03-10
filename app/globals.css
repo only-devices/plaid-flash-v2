@@ -619,7 +619,7 @@ body {
 .json-copy-expandable.expanded .expandable-menu {
   opacity: 1;
   visibility: visible;
-  max-width: 240px;
+  max-width: 400px;
   transform: translateX(0);
 }
 
@@ -675,6 +675,10 @@ body {
 }
 
 .modal-button-row.two-buttons {
+  justify-content: space-between;
+}
+
+.modal-button-row.three-buttons {
   justify-content: space-between;
 }
 
@@ -800,6 +804,14 @@ body {
 
 .button-red:hover {
   box-shadow: 0 8px 20px rgba(196, 61, 82, 0.4);
+}
+
+.button-gray {
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+}
+
+.button-gray:hover {
+  box-shadow: 0 8px 20px rgba(75, 85, 99, 0.4);
 }
 
 .code-block {

@@ -54,6 +54,7 @@ export default function Home() {
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const accessTokenRef = useRef<string | null>(null);
+  const [clientUserId, setClientUserId] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
   const [modalState, setModalState] = useState<
@@ -921,11 +922,13 @@ export default function Home() {
     }
 
     // Build the FULL configuration that will be sent to Plaid
+    const generatedClientUserId = generateClientUserId();
+    setClientUserId(generatedClientUserId);
     const fullConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber 
-        ? { client_user_id: generateClientUserId(), phone_number: '+14155550011' }
-        : { client_user_id: generateClientUserId() },
+        ? { client_user_id: generatedClientUserId, phone_number: '+14155550011' }
+        : { client_user_id: generatedClientUserId },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
@@ -1343,14 +1346,16 @@ export default function Home() {
     }
 
     // Build the FULL configuration for CRA products (and Multi-item Link, when enabled)
+    const craClientUserId = userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_');
+    setClientUserId(craClientUserId);
     const fullConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
         ? {
-            client_user_id: userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_'),
+            client_user_id: craClientUserId,
             phone_number: '+14155550011',
           }
-        : { client_user_id: userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_') },
+        : { client_user_id: craClientUserId },
       client_name: 'Plaid Flash',
       products: productConfig.products,
       country_codes: ['US'],
@@ -3853,6 +3858,7 @@ export default function Home() {
       setAccountsData(null);
       setProductData(null);
       setAccessToken(null);
+      setClientUserId(null);
       setMultiItemAccessTokens([]);
       setActiveMultiItemAccessTokenIndex(0);
       setLinkToken(null);
@@ -4315,11 +4321,13 @@ export default function Home() {
       return;
     }
 
+    const demoClientUserId = generateClientUserId();
+    setClientUserId(demoClientUserId);
     const demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
-        ? { client_user_id: generateClientUserId(), phone_number: '+14155550011' }
-        : { client_user_id: generateClientUserId() },
+        ? { client_user_id: demoClientUserId, phone_number: '+14155550011' }
+        : { client_user_id: demoClientUserId },
       client_name: 'Plaid Flash',
       products,
       country_codes: ['US'],
@@ -4404,6 +4412,7 @@ export default function Home() {
       setProductData(null);
       setCallbackData(null);
       setAccessToken(null);
+      setClientUserId(null);
       setMultiItemAccessTokens([]);
       setActiveMultiItemAccessTokenIndex(0);
       setHybridModeActive(false);
@@ -4512,6 +4521,7 @@ export default function Home() {
     setProductData(null);
     setCallbackData(null);
     setAccessToken(null);
+    setClientUserId(null);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
     setHybridModeActive(false);
@@ -4567,6 +4577,7 @@ export default function Home() {
     setProductData(null);
     setCallbackData(null);
     setAccessToken(null);
+    setClientUserId(null);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
     setHybridModeActive(false);
@@ -4669,6 +4680,7 @@ export default function Home() {
       setProductData(null);
       setCallbackData(null);
       setAccessToken(null);
+      setClientUserId(null);
       setMultiItemAccessTokens([]);
       setActiveMultiItemAccessTokenIndex(0);
       setHybridModeActive(false);
@@ -4755,6 +4767,7 @@ export default function Home() {
     setProductData(null);
     setCallbackData(null);
     setAccessToken(null);
+    setClientUserId(null);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
     setHybridModeActive(false);
@@ -6278,7 +6291,8 @@ export default function Home() {
               suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
-                linkToken: linkToken
+                linkToken: linkToken,
+                clientUserId: clientUserId
               }}
             />
           </div>
@@ -6375,7 +6389,8 @@ export default function Home() {
               suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
-                linkToken: linkToken
+                linkToken: linkToken,
+                clientUserId: clientUserId
               }}
             />
           </div>
@@ -6399,7 +6414,8 @@ export default function Home() {
               suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
-                linkToken: linkToken
+                linkToken: linkToken,
+                clientUserId: clientUserId
               }}
             />
           </div>
@@ -6449,7 +6465,8 @@ export default function Home() {
               data={accountsData}
               expandableCopy={{
                 responseData: accountsData,
-                accessToken: accessToken
+                accessToken: accessToken,
+                clientUserId: clientUserId
               }}
             />
           </div>
@@ -6481,6 +6498,7 @@ export default function Home() {
                 accessToken: accessToken,
                 userId: userId,
                 userToken: userToken,
+                clientUserId: clientUserId,
                 isCRA: true,
               }}
             />
@@ -6613,7 +6631,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <div className="modal-button-row two-buttons">
+              <div className={`modal-button-row ${isCraReportWaiting ? 'three-buttons' : 'two-buttons'}`}>
                 <button
                   className="action-button button-red"
                   onClick={() => {
@@ -6625,6 +6643,14 @@ export default function Home() {
                 >
                   Clear
                 </button>
+                {isCraReportWaiting && (
+                  <button
+                    className="action-button button-gray"
+                    onClick={returnToProductMenuNoRemove}
+                  >
+                    Skip
+                  </button>
+                )}
                 <ArrowButton
                   variant="blue"
                   onClick={() => {
@@ -7025,10 +7051,12 @@ export default function Home() {
                   responseData: productData,
                   userId: userId,
                   userToken: userToken,
+                  clientUserId: clientUserId,
                   isCRA: true
                 } : {
                   responseData: productData,
-                  accessToken: accessToken || demoAccessToken
+                  accessToken: accessToken || demoAccessToken,
+                  clientUserId: clientUserId
                 }}
               />
             )}
@@ -7510,7 +7538,8 @@ export default function Home() {
                     data={accountsData}
                     expandableCopy={{
                       responseData: accountsData,
-                      accessToken: accessToken
+                      accessToken: accessToken,
+                      clientUserId: clientUserId
                     }}
                   />
                 </div>
@@ -7554,7 +7583,8 @@ export default function Home() {
                       highlightKeys={productConfig?.highlightKeys}
                       expandableCopy={{
                         responseData: productData,
-                        accessToken: accessToken
+                        accessToken: accessToken,
+                        clientUserId: clientUserId
                       }}
                     />
                   );

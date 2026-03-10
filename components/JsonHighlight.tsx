@@ -11,6 +11,7 @@ interface JsonHighlightProps {
     userId?: string | null;
     userToken?: string | null;
     linkToken?: string | null;
+    clientUserId?: string | null;
     isCRA?: boolean;
   };
 }
@@ -39,7 +40,7 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
     }
   };
 
-  const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken' | 'linkToken') => {
+  const handleExpandableCopy = async (type: 'response' | 'accessToken' | 'userId' | 'userToken' | 'linkToken' | 'clientUserId') => {
     if (!expandableCopy) return;
     
     try {
@@ -53,6 +54,8 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
         await navigator.clipboard.writeText(expandableCopy.userToken);
       } else if (type === 'linkToken' && expandableCopy.linkToken) {
         await navigator.clipboard.writeText(expandableCopy.linkToken);
+      } else if (type === 'clientUserId' && expandableCopy.clientUserId) {
+        await navigator.clipboard.writeText(expandableCopy.clientUserId);
       }
       
       // Show success state
@@ -266,6 +269,14 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
                   onClick={() => handleExpandableCopy('linkToken')}
                 >
                   Link Token
+                </button>
+              )}
+              {expandableCopy.clientUserId && (
+                <button 
+                  className="expandable-pill-button"
+                  onClick={() => handleExpandableCopy('clientUserId')}
+                >
+                  client_user_id
                 </button>
               )}
             </div>
