@@ -4,6 +4,8 @@ Plaid Flash is a lightweight Next.js app for quickly testing Plaid Link flows an
 
 **Live app**: `https://plaid-flash.vercel.app`
 
+<img src="https://deploy-badge.vercel.app/vercel/plaid-flash" alt="Vercel Deploy"></img>
+
 ## Contents
 
 - [Advanced Mode (Docker)](#advanced-mode-docker)
