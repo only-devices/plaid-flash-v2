@@ -192,6 +192,13 @@ export default function Home() {
   const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
 
+  const linkTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    linkTokenRef.current = linkToken;
+  }, [linkToken]);
+
+  const exchangePublicTokensAndProceedRef = useRef<(tokens: string[]) => Promise<void>>();
+
   useEffect(() => {
     accessTokenRef.current = accessToken;
   }, [accessToken]);
@@ -1395,8 +1402,8 @@ export default function Home() {
       Object.assign(fullConfig, productConfig.additionalLinkParams);
     }
 
-    // Add webhook URL for products that require it (and always for Multi-item Link)
-    if (effectiveWebhookConfigUrl && (productConfig.requiresWebhook || multiItemLinkEnabled)) {
+    // Add webhook URL for products that require it
+    if (effectiveWebhookConfigUrl && productConfig.requiresWebhook) {
       fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
@@ -2993,10 +3000,53 @@ export default function Home() {
       return;
     }
 
-    // Multi-item Link: do not show onSuccess screen for non-CRA products (tokens come from LINK webhooks)
+    // Multi-item Link: call /link/token/get to retrieve all public_tokens, then exchange them
     const isMultiItemNonCra = multiItemLinkEnabled && !productConfig?.isCRA;
     if (isMultiItemNonCra) {
+      const currentLinkToken = linkTokenRef.current;
+      setShowEventLogs(false);
 
+      (async () => {
+        await new Promise((r) => setTimeout(r, 600));
+        setShowModal(true);
+        setModalState('processing-accounts');
+        try {
+          if (!currentLinkToken) {
+            throw new Error('Missing link_token for /link/token/get');
+          }
+          const resp = await fetch('/api/link-token-get', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ link_token: currentLinkToken }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            setErrorData(data);
+            setApiStatusCode(resp.status);
+            setModalState('api-error');
+            return;
+          }
+
+          const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
+          const publicTokens: string[] = itemAddResults
+            .map((r: any) => r?.public_token)
+            .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
+
+          if (publicTokens.length === 0) {
+            throw new Error('No public_tokens found in /link/token/get response');
+          }
+
+          await exchangePublicTokensAndProceedRef.current?.(publicTokens);
+        } catch (error: any) {
+          console.error('Multi-item Link token/get error:', error);
+          setErrorData({
+            error: 'MULTI_ITEM_TOKEN_GET_ERROR',
+            message: error.message || 'Failed to retrieve tokens from /link/token/get',
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+        }
+      })();
       return;
     }
 
@@ -4342,8 +4392,8 @@ export default function Home() {
     // Merge any per-product additional link params (e.g., CRA permissible purpose)
     Object.assign(demoConfig, mergedAdditionalLinkParams);
 
-    // Add webhook if needed (CRA, Hosted Link, or Multi-item Link)
-    if (effectiveWebhookConfigUrl && (includesCra || hostedLinkEnabled || multiItemLinkEnabled)) {
+    // Add webhook if needed (CRA or Hosted Link)
+    if (effectiveWebhookConfigUrl && (includesCra || hostedLinkEnabled)) {
       demoConfig.webhook = effectiveWebhookConfigUrl;
     }
 
@@ -4992,6 +5042,7 @@ export default function Home() {
       setShowModal(true);
     }
   };
+  exchangePublicTokensAndProceedRef.current = exchangePublicTokensAndProceed;
 
   const handleMultiItemForward = async (publicTokens: string[]) => {
     if (!isMultiItemFlowActive) return;
@@ -6631,7 +6682,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <div className={`modal-button-row ${isCraReportWaiting ? 'three-buttons' : 'two-buttons'}`}>
+              <div className="modal-button-row three-buttons">
                 <button
                   className="action-button button-red"
                   onClick={() => {
@@ -6649,6 +6700,53 @@ export default function Home() {
                     onClick={returnToProductMenuNoRemove}
                   >
                     Skip
+                  </button>
+                )}
+                {!isCraReportWaiting && (
+                  <button
+                    className="action-button button-gray"
+                    onClick={async () => {
+                      const currentLinkToken = linkToken;
+                      if (!currentLinkToken) {
+                        setHostedLinkManualParseError('No link_token available');
+                        return;
+                      }
+                      setModalState('processing-accounts');
+                      try {
+                        const resp = await fetch('/api/link-token-get', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ link_token: currentLinkToken }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) {
+                          setErrorData(data);
+                          setApiStatusCode(resp.status);
+                          setModalState('api-error');
+                          return;
+                        }
+                        const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
+                        const tokens: string[] = itemAddResults
+                          .map((r: any) => r?.public_token)
+                          .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
+                        if (tokens.length === 0) {
+                          setHostedLinkManualParseError('No public_tokens found in /link/token/get response. Link session may not be finished yet.');
+                          setModalState('hosted-waiting');
+                          return;
+                        }
+                        await handleHostedLinkForward(tokens);
+                      } catch (error: any) {
+                        console.error('Hosted Link token/get error:', error);
+                        setErrorData({
+                          error: 'HOSTED_LINK_TOKEN_GET_ERROR',
+                          message: error.message || 'Failed to retrieve tokens from /link/token/get',
+                        });
+                        setApiStatusCode(500);
+                        setModalState('api-error');
+                      }
+                    }}
+                  >
+                    Fetch Tokens
                   </button>
                 )}
                 <ArrowButton
@@ -7273,15 +7371,13 @@ export default function Home() {
                     label="Multi-item Link"
                     checked={tempMultiItemLinkEnabled}
                     onChange={handleToggleMultiItemLink}
-                  disabled={tempLayerMode || !effectiveWebhookConfigUrlForSettings || tempBypassLink}
+                  disabled={tempLayerMode || tempBypassLink}
                     tooltip={
                     tempLayerMode
                       ? 'Disable Layer to use Multi-item Link'
                       : tempBypassLink
                         ? 'Disable Bypass Link to use Multi-item Link'
-                        : !effectiveWebhookConfigUrlForSettings
-                          ? 'Set your webhook URL below to enable Multi-item Link'
-                          : undefined
+                        : undefined
                     }
                   />
                   <SettingsToggle
@@ -7412,7 +7508,7 @@ export default function Home() {
       )}
       
       {/* Event Logs Modal - Shows side by side with Plaid Link (above embedded overlay when embedded mode) */}
-      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} ${embeddedLinkActive ? 'event-logs-above-embedded' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''} ${isMultiItemFlowActive ? 'multiitem' : ''}`}>
+      <div className={`event-logs-container ${showEventLogs ? 'visible' : ''} ${embeddedLinkActive ? 'event-logs-above-embedded' : ''} event-logs-${eventLogsPosition} ${isTransitioningModals ? 'fading-out' : ''}`}>
         <div className="event-logs-modal">
           <div className="modal-success">
             <div className="success-header">
