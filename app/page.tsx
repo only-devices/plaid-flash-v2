@@ -10,7 +10,6 @@ import JsonHighlight from '@/components/JsonHighlight';
 import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsToggle from '@/components/SettingsToggle';
 import ArrowButton from '@/components/ArrowButton';
-import CashflowUpdatesWebhookPanel, { type CashflowUpdatesWebhookEvent } from '@/components/CashflowUpdatesWebhookPanel';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
@@ -266,9 +265,6 @@ export default function Home() {
   const [cashflowUpdatesSelectedIndex, setCashflowUpdatesSelectedIndex] = useState<number>(0);
   const [cashflowUpdatesSubscribedItemId, setCashflowUpdatesSubscribedItemId] = useState<string | null>(null);
   const [cashflowUpdatesSubscriptionResponse, setCashflowUpdatesSubscriptionResponse] = useState<any>(null);
-  const [cashflowUpdatesManualPayload, setCashflowUpdatesManualPayload] = useState<string>('');
-  const [cashflowUpdatesManualParseError, setCashflowUpdatesManualParseError] = useState<string | null>(null);
-  const [cashflowUpdatesManualWebhooks, setCashflowUpdatesManualWebhooks] = useState<CashflowUpdatesWebhookEvent[]>([]);
 
   const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
   const effectiveProductConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
@@ -2795,10 +2791,6 @@ export default function Home() {
             setCashflowUpdatesSelectedIndex(0);
             setCashflowUpdatesSubscribedItemId(null);
             setCashflowUpdatesSubscriptionResponse(null);
-            setCashflowUpdatesManualPayload('');
-            setCashflowUpdatesManualParseError(null);
-            setCashflowUpdatesManualWebhooks([]);
-      
 
             setModalState('cashflow-updates-loading-items');
             setShowModal(true);
@@ -3373,10 +3365,6 @@ export default function Home() {
           setCashflowUpdatesSelectedIndex(0);
           setCashflowUpdatesSubscribedItemId(null);
           setCashflowUpdatesSubscriptionResponse(null);
-          setCashflowUpdatesManualPayload('');
-          setCashflowUpdatesManualParseError(null);
-          setCashflowUpdatesManualWebhooks([]);
-    
 
           setModalState('cashflow-updates-loading-items');
           setShowModal(true);
@@ -4444,12 +4432,9 @@ export default function Home() {
     setCashflowUpdatesItems([]);
     setCashflowUpdatesSelectedIndex(0);
     setCashflowUpdatesSubscribedItemId(null);
-    setCashflowUpdatesSubscriptionResponse(null);
-    setCashflowUpdatesManualPayload('');
-    setCashflowUpdatesManualParseError(null);
-    setCashflowUpdatesManualWebhooks([]);
-    
-    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+            setCashflowUpdatesSubscriptionResponse(null);
+      
+            const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const shouldRemoveBothForHybrid = hybridModeActive;
     const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
@@ -4671,9 +4656,6 @@ export default function Home() {
     setCashflowUpdatesSelectedIndex(0);
     setCashflowUpdatesSubscribedItemId(null);
     setCashflowUpdatesSubscriptionResponse(null);
-    setCashflowUpdatesManualPayload('');
-    setCashflowUpdatesManualParseError(null);
-    setCashflowUpdatesManualWebhooks([]);
 
     // Reset CRA state
     setUserCreateConfig(null);
@@ -5559,65 +5541,7 @@ export default function Home() {
     return info.institution_name || info.institution_id || info.item_id || `Item ${index + 1}`;
   };
 
-  const CASHFLOW_UPDATES_QUALIFYING_CODES = useMemo(
-    () => new Set(['CASH_FLOW_INSIGHTS_UPDATED', 'INSIGHTS_UPDATED']),
-    []
-  );
-
   const cashflowUpdatesSelectedItem = cashflowUpdatesItems[cashflowUpdatesSelectedIndex] || null;
-
-  const cashflowUpdatesCombinedEvents = useMemo(() => {
-    return [...cashflowUpdatesManualWebhooks];
-  }, [cashflowUpdatesManualWebhooks]);
-
-  const cashflowUpdatesQualifyingEvents = useMemo(() => {
-    return cashflowUpdatesCombinedEvents
-      .filter((e) => e.webhook_type === 'CASH_FLOW_UPDATES')
-      .filter((e) => CASHFLOW_UPDATES_QUALIFYING_CODES.has(e.webhook_code))
-      .filter((e) => !cashflowUpdatesSubscribedItemId || !e.item_id || e.item_id === cashflowUpdatesSubscribedItemId);
-  }, [cashflowUpdatesCombinedEvents, CASHFLOW_UPDATES_QUALIFYING_CODES, cashflowUpdatesSubscribedItemId]);
-
-  const cashflowUpdatesCanForward = cashflowUpdatesQualifyingEvents.length > 0;
-
-  const handleCashflowUpdatesManualAdd = useCallback(() => {
-    const raw = cashflowUpdatesManualPayload.trim();
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-
-      const nextEvents: CashflowUpdatesWebhookEvent[] = arr
-        .map((obj: any, idx: number) => {
-          const payload = obj?.payload && typeof obj?.payload === 'object' ? obj.payload : obj;
-          const webhook_type = String(payload?.webhook_type || obj?.webhook_type || '').trim();
-          const webhook_code = String(payload?.webhook_code || obj?.webhook_code || '').trim();
-          const item_id = String(payload?.item_id || obj?.item_id || '').trim() || undefined;
-
-          if (!webhook_type || !webhook_code) return null;
-
-          return {
-            id: `manual_${Date.now()}_${idx}`,
-            webhook_type,
-            webhook_code,
-            item_id,
-            timestamp: new Date().toISOString(),
-            payload,
-          };
-        })
-        .filter(Boolean) as CashflowUpdatesWebhookEvent[];
-
-      if (nextEvents.length === 0) {
-        setCashflowUpdatesManualParseError('No webhook events detected. Expected objects with webhook_type + webhook_code.');
-        return;
-      }
-
-      setCashflowUpdatesManualWebhooks((prev) => [...nextEvents, ...prev]);
-      setCashflowUpdatesManualParseError(null);
-    } catch (err: any) {
-      setCashflowUpdatesManualParseError(err?.message || 'Invalid JSON');
-    }
-  }, [cashflowUpdatesManualPayload]);
 
   const handleCashflowUpdatesSubscribe = useCallback(async () => {
     if (!cashflowUpdatesSelectedItem?.item_id) return;
@@ -5649,10 +5573,6 @@ export default function Home() {
       setShowModal(true);
       return;
     }
-
-    // Clear old events so Forward gating is for this subscription.
-    setCashflowUpdatesManualWebhooks([]);
-    setCashflowUpdatesManualParseError(null);
 
     setModalState('cashflow-updates-subscribing');
     setShowModal(true);
@@ -6839,7 +6759,6 @@ export default function Home() {
     }
 
     if (modalState === 'cashflow-updates-webhooks') {
-      const allowManualPaste = true;
       const selected = cashflowUpdatesSelectedItem;
 
       return (
@@ -6861,18 +6780,9 @@ export default function Home() {
             </div>
           )}
 
-          <CashflowUpdatesWebhookPanel
-            visible={true}
-            subscribedItemId={cashflowUpdatesSubscribedItemId}
-            events={cashflowUpdatesCombinedEvents}
-            allowManualPaste={allowManualPaste}
-            manualPayload={cashflowUpdatesManualPayload}
-            onManualPayloadChange={(value) => setCashflowUpdatesManualPayload(value)}
-            onManualAdd={handleCashflowUpdatesManualAdd}
-            manualParseError={cashflowUpdatesManualParseError}
-            canForward={cashflowUpdatesCanForward}
-            onForward={handleCashflowUpdatesFetchReport}
-          />
+          <div className="modal-button-row single-button">
+            <ArrowButton variant="blue" onClick={handleCashflowUpdatesFetchReport} />
+          </div>
         </div>
       );
     }
