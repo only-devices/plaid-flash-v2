@@ -12,7 +12,6 @@ interface JsonHighlightProps {
     userToken?: string | null;
     linkToken?: string | null;
     clientUserId?: string | null;
-    isCRA?: boolean;
   };
 }
 
@@ -232,36 +231,29 @@ export default function JsonHighlight({ data, highlightKeys = [], showCopyButton
               >
                 Response
               </button>
-              {expandableCopy.isCRA ? (
-                // CRA products: show user_id and/or user_token buttons
-                <>
-                  {expandableCopy.userId && (
-                    <button 
-                      className="expandable-pill-button"
-                      onClick={() => handleExpandableCopy('userId')}
-                    >
-                      user_id
-                    </button>
-                  )}
-                  {expandableCopy.userToken && (
-                    <button 
-                      className="expandable-pill-button"
-                      onClick={() => handleExpandableCopy('userToken')}
-                    >
-                      user_token
-                    </button>
-                  )}
-                </>
-              ) : (
-                // Non-CRA products: show access token button only if provided
-                expandableCopy.accessToken && (
-                  <button 
-                    className="expandable-pill-button"
-                    onClick={() => handleExpandableCopy('accessToken')}
-                  >
-                    Access Token
-                  </button>
-                )
+              {expandableCopy.accessToken && (
+                <button 
+                  className="expandable-pill-button"
+                  onClick={() => handleExpandableCopy('accessToken')}
+                >
+                  Access Token
+                </button>
+              )}
+              {expandableCopy.userId && (
+                <button 
+                  className="expandable-pill-button"
+                  onClick={() => handleExpandableCopy('userId')}
+                >
+                  user_id
+                </button>
+              )}
+              {expandableCopy.userToken && (
+                <button 
+                  className="expandable-pill-button"
+                  onClick={() => handleExpandableCopy('userToken')}
+                >
+                  user_token
+                </button>
               )}
               {expandableCopy.linkToken && (
                 <button 

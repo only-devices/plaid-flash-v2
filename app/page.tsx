@@ -140,6 +140,8 @@ export default function Home() {
   const [altCredentialsAvailable, setAltCredentialsAvailable] = useState(false);
   const [includePhoneNumber, setIncludePhoneNumber] = useState(true);
   const [tempIncludePhoneNumber, setTempIncludePhoneNumber] = useState(true);
+  const [alwaysUserCreate, setAlwaysUserCreate] = useState(false);
+  const [tempAlwaysUserCreate, setTempAlwaysUserCreate] = useState(false);
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
   const [showZapResetButton, setShowZapResetButton] = useState(false);
@@ -876,8 +878,8 @@ export default function Home() {
       return;
     }
 
-    // For CRA products (and Multi-item Link), show user create modal first
-    if (productConfig.isCRA || multiItemLinkEnabled) {
+    // For CRA products, Multi-item Link, or when "Always /user/create" is on, show user create modal first
+    if (productConfig.isCRA || multiItemLinkEnabled || alwaysUserCreate) {
       showUserCreatePreview(productId);
       return;
     }
@@ -1032,12 +1034,12 @@ export default function Home() {
     } else if (layerMode && productConfig.isCRA && !useLegacyUserToken) {
       // Layer + CRA (user_id flow): identity will be collected in Layer and persisted later via /user/update.
       userConfig = {
-        client_user_id: 'flash_cra_user_' + Date.now(),
+        client_user_id: 'flash_user_' + Date.now(),
       };
     } else if (useLegacyUserToken) {
       // Legacy format using consumer_report_user_identity
       userConfig = {
-        client_user_id: 'flash_cra_user_' + Date.now(),
+        client_user_id: 'flash_user_' + Date.now(),
         consumer_report_user_identity: {
           first_name: 'Flash',
           last_name: 'User',
@@ -1057,7 +1059,7 @@ export default function Home() {
     } else {
       // New format using identity object
       userConfig = {
-        client_user_id: 'flash_cra_user_' + Date.now(),
+        client_user_id: 'flash_user_' + Date.now(),
         identity: {
           name: {
             given_name: 'Test',
@@ -1201,11 +1203,18 @@ export default function Home() {
         return;
       }
 
-      // Demo Mode CRA bootstrap: after /user/create, resume pending /link/token/create preview
+      // Demo Mode bootstrap: after /user/create, resume pending /link/token/create preview
       if (demoMode && isDemoModeStarting && demoPendingLinkTokenConfig) {
         const pendingCfg: any = { ...demoPendingLinkTokenConfig };
 
-        // Add user_id or user_token based on legacy toggle (same as normal CRA flow)
+        // Sync client_user_id from /user/create into the link token config
+        const userCreateClientUserId = String(configToUse?.client_user_id || '').trim();
+        if (userCreateClientUserId && pendingCfg.user) {
+          pendingCfg.user = { ...pendingCfg.user, client_user_id: userCreateClientUserId };
+          setClientUserId(userCreateClientUserId);
+        }
+
+        // Add user_id or user_token based on legacy toggle
         if (useLegacyUserToken && newUserToken) {
           pendingCfg.user_token = newUserToken;
           setUsedUserToken(true);
@@ -1349,7 +1358,7 @@ export default function Home() {
     }
 
     // Build the FULL configuration for CRA products (and Multi-item Link, when enabled)
-    const craClientUserId = userCreateConfig?.client_user_id || generateClientUserId('flash_cra_user_');
+    const craClientUserId = userCreateConfig?.client_user_id || generateClientUserId('flash_user_');
     setClientUserId(craClientUserId);
     const fullConfig: any = {
       link_customization_name: 'flash',
@@ -2358,6 +2367,7 @@ export default function Home() {
     setTempUseLegacyUserToken(useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
     setTempIncludePhoneNumber(includePhoneNumber);
+    setTempAlwaysUserCreate(alwaysUserCreate);
     setTempBypassLink(bypassLink);
     setTempWebhookUrlOverride(webhookUrlOverride);
     // Hide product modal and show settings modal
@@ -2410,6 +2420,7 @@ export default function Home() {
       setUseAltCredentials(tempUseAltCredentials);
     }
     setIncludePhoneNumber(tempIncludePhoneNumber);
+    setAlwaysUserCreate(tempAlwaysUserCreate);
     setBypassLink(tempBypassLink);
 
     // Persist webhook URL to localStorage
@@ -2453,6 +2464,10 @@ export default function Home() {
 
   const handleToggleEmbedded = () => {
     setTempEmbeddedMode(!tempEmbeddedMode);
+  };
+
+  const handleToggleAlwaysUserCreate = () => {
+    setTempAlwaysUserCreate(!tempAlwaysUserCreate);
   };
 
   const handleToggleIncludePhoneNumber = () => {
@@ -4396,12 +4411,12 @@ export default function Home() {
     // Set flag that we're starting demo mode
     setIsDemoModeStarting(true);
 
-    if (includesCra) {
-      // CRA requires /user/create first so we can include user_id/user_token in /link/token/create
-      const craLeaf = selectedLeafConfigs.find((c) => c.isCRA);
-      const craProductIdForUserCreate = craLeaf?.id || 'cra-base-report';
+    if (includesCra || alwaysUserCreate) {
+      // /user/create first so we can include user_id/user_token in /link/token/create
+      const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
+      const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
       setDemoPendingLinkTokenConfig(demoConfig);
-      showUserCreatePreview(craProductIdForUserCreate);
+      showUserCreatePreview(productIdForUserCreate);
       return;
     }
 
@@ -6263,6 +6278,8 @@ export default function Home() {
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
+                userId: userId,
+                userToken: userToken,
                 clientUserId: clientUserId
               }}
             />
@@ -6361,6 +6378,8 @@ export default function Home() {
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
+                userId: userId,
+                userToken: userToken,
                 clientUserId: clientUserId
               }}
             />
@@ -6386,6 +6405,8 @@ export default function Home() {
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
+                userId: userId,
+                userToken: userToken,
                 clientUserId: clientUserId
               }}
             />
@@ -6437,6 +6458,8 @@ export default function Home() {
               expandableCopy={{
                 responseData: accountsData,
                 accessToken: accessToken,
+                userId: userId,
+                userToken: userToken,
                 clientUserId: clientUserId
               }}
             />
@@ -6470,7 +6493,6 @@ export default function Home() {
                 userId: userId,
                 userToken: userToken,
                 clientUserId: clientUserId,
-                isCRA: true,
               }}
             />
           </div>
@@ -6764,7 +6786,8 @@ export default function Home() {
       return (
         <div className="modal-success">
           <div className="success-header">
-            <h2>Cashflow Updates</h2>
+            <div className="success-icon">✓</div>
+            <h2>Successfully subscribed to Cashflow Updates!</h2>
           </div>
 
           {selected?.item_id && (
@@ -7055,15 +7078,11 @@ export default function Home() {
               <JsonHighlight 
                 data={productData} 
                 highlightKeys={productConfig?.highlightKeys}
-                expandableCopy={isCRA ? {
+                expandableCopy={{
                   responseData: productData,
+                  accessToken: isCRA ? undefined : (accessToken || demoAccessToken),
                   userId: userId,
                   userToken: userToken,
-                  clientUserId: clientUserId,
-                  isCRA: true
-                } : {
-                  responseData: productData,
-                  accessToken: accessToken || demoAccessToken,
                   clientUserId: clientUserId
                 }}
               />
@@ -7301,6 +7320,12 @@ export default function Home() {
                     label="Include phone_number in Link Token Create config"
                     checked={tempIncludePhoneNumber}
                     onChange={handleToggleIncludePhoneNumber}
+                    disabled={false}
+                  />
+                  <SettingsToggle
+                    label="Always call /user/create first"
+                    checked={tempAlwaysUserCreate}
+                    onChange={handleToggleAlwaysUserCreate}
                     disabled={false}
                   />
                 </>
@@ -7545,6 +7570,8 @@ export default function Home() {
                     expandableCopy={{
                       responseData: accountsData,
                       accessToken: accessToken,
+                      userId: userId,
+                      userToken: userToken,
                       clientUserId: clientUserId
                     }}
                   />
@@ -7590,6 +7617,8 @@ export default function Home() {
                       expandableCopy={{
                         responseData: productData,
                         accessToken: accessToken,
+                        userId: userId,
+                        userToken: userToken,
                         clientUserId: clientUserId
                       }}
                     />
