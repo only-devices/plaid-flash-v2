@@ -2479,11 +2479,13 @@ export default function Home() {
     setTempLayerMode(next);
 
     // Layer is incompatible with several Link modes. If enabling Layer, turn those off.
+    // Layer also requires the ALT client ID.
     if (next) {
       setTempEmbeddedMode(false);
       setTempHostedLinkEnabled(false);
       setTempMultiItemLinkEnabled(false);
       setTempBypassLink(false);
+      setTempUseAltCredentials(true);
     } else {
       // Turning Layer off: also turn off Layer-only subfeatures.
       setTempLayerIdentityMatchEnabled(false);
@@ -4282,9 +4284,9 @@ export default function Home() {
       (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
-      // Clear previous events and show event logs (unless in Zap Mode)
+      // Clear previous events and show event logs (unless in Zap or Embedded mode)
       setLinkEvents([]);
-      if (!zapMode) {
+      if (!zapMode && !embeddedMode) {
         setShowEventLogs(true);
       }
       setShowProductModal(false); // Ensure product modal is hidden
@@ -7337,7 +7339,8 @@ export default function Home() {
                     label="Use ALT_PLAID_CLIENT_ID"
                     checked={tempUseAltCredentials}
                     onChange={handleToggleAltCredentials}
-                    disabled={!altCredentialsAvailable}
+                    disabled={!altCredentialsAvailable || tempLayerMode}
+                    tooltip={tempLayerMode ? 'Layer requires the ALT Client ID' : undefined}
                   />
                   <SettingsToggle
                     label="Use legacy user_token"

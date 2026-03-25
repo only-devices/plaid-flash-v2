@@ -60,7 +60,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         apiTitle: '/auth/get',
         highlightKeys: ['numbers'],
         icon: '/icons/auth.png',
-        layerTemplateId: 'template_5xk9wmaarmlp'
+        layerTemplateId: 'template_zpynxmk2g4tr'
       },
       {
         id: 'signal',
@@ -117,7 +117,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiEndpoint: '/api/identity-get',
             apiTitle: '/identity/get',
             highlightKeys: ['owners'],
-            layerTemplateId: 'template_qfw474kt3cho'
+            layerTemplateId: 'template_zpynxmk2g4tr'
           },
           {
             id: 'identity-match',
@@ -144,7 +144,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               }
             },
             highlightKeys: ['legal_name', 'phone_number', 'email_address', 'address'],
-            layerTemplateId: 'template_qfw474kt3cho'
+            layerTemplateId: 'template_zpynxmk2g4tr'
           }
         ]
       },
@@ -212,7 +212,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
                 override_password: "pass_transactions_dynamic",
               }
             },
-            layerTemplateId: 'template_xa92uqqdeole'
+            layerTemplateId: 'template_zpynxmk2g4tr'
           },
           {
             id: 'transactions-sync',
@@ -236,7 +236,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               }
             },
             highlightKeys: ['added', 'has_more', 'modified', 'next_cursor', 'removed', 'transactions_update_status'],
-            layerTemplateId: 'template_xa92uqqdeole'
+            layerTemplateId: 'template_zpynxmk2g4tr'
           }
         ],
       },
@@ -348,7 +348,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               }
             },
             requiresWebhook: true,
-            layerTemplateId: 'template_phj5hyzpc3v5'
+            layerTemplateId: 'template_jbeu3j65l0z7'
           }
         ]
       },
@@ -443,7 +443,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               }
             },
             requiresWebhook: true,
-            layerTemplateId: 'template_phj5hyzpc3v5'
+            layerTemplateId: 'template_jbeu3j65l0z7'
           },
           {
             id: 'cra-income-insights-pdf',
@@ -470,7 +470,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               }
             },
             requiresWebhook: true,
-            layerTemplateId: 'template_phj5hyzpc3v5',
+            layerTemplateId: 'template_jbeu3j65l0z7',
             returnsPdf: true
           }
         ]
@@ -503,7 +503,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
             },
             requiresWebhook: true,
-            layerTemplateId: 'template_phj5hyzpc3v5'
+            layerTemplateId: 'template_jbeu3j65l0z7'
           },
           {
             id: 'cra-partner-insights',
@@ -521,7 +521,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
               consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
             },
             requiresWebhook: true,
-            layerTemplateId: 'template_phj5hyzpc3v5'
+            layerTemplateId: 'template_jbeu3j65l0z7'
           }
         ]
       },
