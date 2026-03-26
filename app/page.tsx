@@ -101,6 +101,8 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState('');
   const [errorData, setErrorData] = useState<any>(null);
   const [apiStatusCode, setApiStatusCode] = useState<number>(200);
+  const [isMobile, setIsMobile] = useState(false);
+  const isMobileRef = useRef(false);
   const [linkEvents, setLinkEvents] = useState<any[]>([]);
   const [showEventLogs, setShowEventLogs] = useState(false);
   const [eventLogsCopied, setEventLogsCopied] = useState(false);
@@ -145,6 +147,7 @@ export default function Home() {
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
   const [showZapResetButton, setShowZapResetButton] = useState(false);
+  const [zapMobileStep, setZapMobileStep] = useState<'accounts' | 'product'>('accounts');
   
   // Demo Mode state
   const [demoLinkCompleted, setDemoLinkCompleted] = useState(false);
@@ -194,6 +197,18 @@ export default function Home() {
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
 
   const linkTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = (matches: boolean) => {
+      setIsMobile(matches);
+      isMobileRef.current = matches;
+    };
+    update(mq.matches);
+    const handler = (e: MediaQueryListEvent) => update(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   useEffect(() => {
     linkTokenRef.current = linkToken;
   }, [linkToken]);
@@ -2714,7 +2729,8 @@ export default function Home() {
       
       setProductData(productData);
       
-      // Show Zap Mode results (side-by-side modals)
+      // Show Zap Mode results (side-by-side modals, sequential on mobile)
+      setZapMobileStep('accounts');
       setModalState('zap-mode-results');
       setShowModal(false); // Hide main modal overlay
       setShowZapResetButton(true);
@@ -2998,7 +3014,11 @@ export default function Home() {
 
     // Link-only: Update Mode should always show the standard callback modals (ignore Zap/Multi-item behavior)
     if (isUpdateMode) {
-      setEventLogsPosition('left');
+      if (isMobileRef.current) {
+        setShowEventLogs(true);
+      } else {
+        setEventLogsPosition('left');
+      }
       setShowModal(true);
       setModalState('callback-success');
       setCallbackData({
@@ -3061,7 +3081,11 @@ export default function Home() {
 
     // Layer: always show the standard callback-success modal (even if Zap is enabled)
     if (layerSessionActiveRef.current) {
-      setEventLogsPosition('left');
+      if (isMobileRef.current) {
+        setShowEventLogs(true);
+      } else {
+        setEventLogsPosition('left');
+      }
       setShowModal(true);
       setModalState('callback-success');
       setCallbackData({
@@ -3075,8 +3099,12 @@ export default function Home() {
       // Zap Mode: skip callback modal, go directly to API calls
       handleZapModeSuccess(public_token, metadata);
     } else {
-      // Default mode and Demo Mode: slide event logs to the left and show callback modal
-      setEventLogsPosition('left');
+      // Default mode and Demo Mode: show callback modal
+      if (isMobileRef.current) {
+        setShowEventLogs(true);
+      } else {
+        setEventLogsPosition('left');
+      }
       setShowModal(true);
       setModalState('callback-success');
       setCallbackData({
@@ -3087,11 +3115,11 @@ export default function Home() {
   }, [multiItemLinkEnabled, zapMode, demoMode, handleZapModeSuccess]);
 
   const handleProceedWithSuccess = async () => {
-    // Start fade-out animation for both modals
-    setIsTransitioningModals(true);
-    
-    // Wait for fade-out animation to complete (500ms)
-    await new Promise(resolve => setTimeout(resolve, 500));
+    if (!isMobileRef.current) {
+      // Desktop: fade-out animation for both side-by-side modals
+      setIsTransitioningModals(true);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
     
     // Hide both modals and reset event logs
     setShowEventLogs(false);
@@ -3884,7 +3912,9 @@ export default function Home() {
 
     // Link-only: Update Mode should always show the standard callback modals (ignore Zap/Multi-item behavior)
     if (isUpdateMode) {
-      if (!zapMode) {
+      if (isMobileRef.current) {
+        setShowEventLogs(true);
+      } else if (!zapMode) {
         setEventLogsPosition('left');
       }
       setShowModal(true);
@@ -3925,8 +3955,9 @@ export default function Home() {
       return;
     }
 
-    if (!zapMode) {
-      // Default mode: slide event logs to the left (Link's position)
+    if (isMobileRef.current) {
+      setShowEventLogs(true);
+    } else if (!zapMode) {
       setEventLogsPosition('left');
     }
     
@@ -4286,7 +4317,7 @@ export default function Home() {
     if (shouldOpenLink) {
       // Clear previous events and show event logs (unless in Zap or Embedded mode)
       setLinkEvents([]);
-      if (!zapMode && !embeddedMode) {
+      if (!zapMode && !isMobileRef.current) {
         setShowEventLogs(true);
       }
       setShowProductModal(false); // Ensure product modal is hidden
@@ -7540,6 +7571,11 @@ export default function Home() {
                 )}
               </div>
             </div>
+            {isMobile && (modalState === 'callback-success' || modalState === 'callback-exit') && (
+              <div className="modal-button-row single-button">
+                <ArrowButton variant="blue" onClick={() => setShowEventLogs(false)} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -7552,10 +7588,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* Zap Mode Results - Side by side display of accounts and product data */}
+      {/* Zap Mode Results - Side by side on desktop, sequential on mobile */}
       {modalState === 'zap-mode-results' && productData && (
         <>
-          {accountsData && (
+          {accountsData && (!isMobile || zapMobileStep === 'accounts') && (
             <div className="zap-results-left">
               <div className="modal-success">
                 <div className="success-header">
@@ -7579,10 +7615,16 @@ export default function Home() {
                     }}
                   />
                 </div>
+                {isMobile && (
+                  <div className="modal-button-row single-button">
+                    <ArrowButton variant="blue" onClick={() => setZapMobileStep('product')} />
+                  </div>
+                )}
               </div>
             </div>
           )}
           
+          {(!isMobile || zapMobileStep === 'product' || !accountsData) && (
           <div className={accountsData ? "zap-results-right" : "zap-results-center"}>
             <div className="modal-success">
               <div className="success-header">
@@ -7630,6 +7672,7 @@ export default function Home() {
               </div>
             </div>
           </div>
+          )}
         </>
       )}
 
