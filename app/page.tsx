@@ -968,9 +968,11 @@ export default function Home() {
     // Hosted Link enablement
     if (hostedLinkEnabled) {
       fullConfig.hosted_link = {};
-      if (effectiveWebhookConfigUrl) {
-        fullConfig.webhook = effectiveWebhookConfigUrl;
-      }
+    }
+
+    // Include webhook URL when set
+    if (effectiveWebhookConfigUrl && !fullConfig.webhook) {
+      fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
     setLinkTokenConfig(fullConfig);
@@ -1429,6 +1431,11 @@ export default function Home() {
 
     // Hosted Link relies on webhooks to deliver public_token
     if (hostedLinkEnabled && effectiveWebhookConfigUrl) {
+      fullConfig.webhook = effectiveWebhookConfigUrl;
+    }
+
+    // Include webhook URL when set, even for products that don't require it
+    if (effectiveWebhookConfigUrl && !fullConfig.webhook) {
       fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
@@ -4428,8 +4435,8 @@ export default function Home() {
     // Merge any per-product additional link params (e.g., CRA permissible purpose)
     Object.assign(demoConfig, mergedAdditionalLinkParams);
 
-    // Add webhook if needed (CRA or Hosted Link)
-    if (effectiveWebhookConfigUrl && (includesCra || hostedLinkEnabled)) {
+    // Include webhook URL when set
+    if (effectiveWebhookConfigUrl) {
       demoConfig.webhook = effectiveWebhookConfigUrl;
     }
 
