@@ -433,7 +433,12 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             isCRA: true,
             highlightKeys: ['income_insights'],
             additionalLinkParams: {
-              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT'
+              consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
+              cra_options: {
+                income_insights: {
+                  income_insights_version: 'II2'
+                }
+              }
             },
             additionalSandboxCreateParams: {
               initial_products: ['cra_income_insights'],
@@ -576,5 +581,13 @@ export const getProductConfigById = (id: string): ProductConfig | undefined => {
     }
   }
   return undefined;
+};
+
+// Recursively collect every leaf descendant of `cfg` (including `cfg` itself
+// if it has no children). Used by the Configuration Wizard to flatten a
+// top-level parent's subtree into a single row of selectable pills.
+export const collectLeafConfigs = (cfg: ProductConfig): ProductConfig[] => {
+  if (!cfg.children || cfg.children.length === 0) return [cfg];
+  return cfg.children.flatMap(collectLeafConfigs);
 };
 

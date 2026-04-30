@@ -153,7 +153,6 @@ describe('JsonHighlight', () => {
           responseData: { result: 'ok' },
           userId: 'user_abc',
           userToken: 'user-token-xyz',
-          isCRA: true,
         }}
       />
     );

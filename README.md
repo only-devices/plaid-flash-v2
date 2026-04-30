@@ -56,22 +56,31 @@ docker compose down -v # Stops and removes Docker container
 
 ## How to use the app
 
+### Configuration Wizard
+
+The app opens directly into the **Configuration Wizard** after the welcome animation. The wizard is a single screen with three cards (**Payments and Funding**, **Personal Finance Insights**, **CRA**); each card lists its leaf products as toggleable buttons, optionally grouped by sub-category (e.g. CRA → Income → Income Insights). Pick every product you want to test in the session, then click **Start**.
+
+Once Link completes, the wizard re-appears in **picker** mode showing only the products you selected — clicking a button runs that product's API against the access_token from your Link session. You can run multiple products back-to-back without re-running Link.
+
+The settings gear (top-right of the wizard) opens the Settings modal; the reset icon (top-left, after Link completes) cleans up Items/Users and returns you to the initial selection screen.
+
 ### Typical non-CRA flow
 
-1. Pick a product (e.g. Auth).
-2. Review/edit the `/link/token/create` configuration.
+1. Select one or more non-CRA leaf buttons in the wizard, then click **Start**.
+2. Review/edit the `/link/token/create` configuration (products = the union of your selections).
 3. Complete Link.
 4. Exchange `public_token` → `access_token`.
-5. Call `/accounts/get` (where applicable) and then the selected product endpoint.
+5. The wizard re-opens in picker mode — click any selected button to call `/accounts/get` (where applicable) and then that product's endpoint.
 
 ### CRA flow (Plaid Check / Consumer Report)
 
 CRA products use a **user-based** flow:
 
-1. `/user/create` preview + create
-2. `/link/token/create` includes `user_id` or `user_token` (based on the **Use legacy user_token** toggle)
-3. Complete Link
-4. Run CRA product APIs (paste webhook payloads when prompted)
+1. Select one or more CRA buttons (and optionally non-CRA buttons for hybrid sessions), then click **Start**.
+2. `/user/create` preview + create
+3. `/link/token/create` includes `user_id` or `user_token` (based on the **Use legacy user_token** toggle)
+4. Complete Link
+5. Pick a CRA product from the post-Link picker and run its API (paste webhook payloads when prompted)
 
 ### Hosted Link flow
 
@@ -79,7 +88,7 @@ When **Hosted Link** is enabled:
 
 - `/link/token/create` includes `hosted_link: {}` and returns `hosted_link_url`
 - The app opens Hosted Link in a new tab and waits for `LINK/SESSION_FINISHED`
-- After completion, it continues with the standard exchange → accounts → product flow
+- After completion, it continues with the standard exchange → picker → product flow
 
 ### Layer flow
 
@@ -93,20 +102,21 @@ When **Layer** is enabled, Plaid Flash uses **Layer + Link** (behind the scenes)
 
 ### Update Mode
 
-Under **Link → Update Mode**, you can paste:
+Update Mode is a Settings toggle in the **Link** card (mutually exclusive with Layer / Embedded Link / Hosted Link / Multi-item Link / Bypass Link). When it's on:
 
-- An `access_token` to trigger Item-based update mode
-- A `user_id` or `user_token` to trigger User-based update mode
-
-Update Mode does **not** run downstream product APIs and does **not** automatically remove the Item/User at the end.
+1. Pick the products you want to drive after Link in the wizard, then click **Start**.
+2. Paste an `access_token`, `user_id`, or `user_token` in the input modal.
+3. Plaid Flash builds a `/link/token/create` config that combines your token with the selected products and opens Link in update mode.
+4. After Link succeeds, the post-Link picker lets you call any of the selected products' APIs against the user-supplied token (no `public_token` exchange happens — the token you pasted is used directly).
 
 ### Upgrade Mode
 
-Upgrade Mode is a Plaid flow that lets you add Plaid CRA functionality to existing non-CRA items, and call CRA endpoints once the upgrade is complete. You need only an existing access_token to get started:
+Upgrade Mode is a Plaid flow that lets you add Plaid CRA functionality to existing non-CRA items, and call CRA endpoints once the upgrade is complete. It lives as a button at the bottom of the **CRA** card in the wizard and is selectable only on the initial wizard screen — once enabled it owns the entire session. You need only an existing access_token to get started:
 
-1. Preview + run `/user/create` (supports `user_id` or legacy `user_token` based on the **Use legacy user_token** toggle)
-2. Preview `/link/token/create` (you'll paste the `access_token` and can edit products/options)
-3. Complete Link, wait for `CHECK_REPORT / USER_CHECK_REPORT_READY`, then run the CRA `/get` endpoint
+1. Toggle the **Upgrade Mode** button in the CRA card and click **Start**.
+2. Preview + run `/user/create` (supports `user_id` or legacy `user_token` based on the **Use legacy user_token** toggle)
+3. Preview `/link/token/create` (you'll paste the `access_token` and can edit products/options)
+4. Complete Link, wait for `CHECK_REPORT / USER_CHECK_REPORT_READY`, then pick the CRA product to run from the post-Link picker
 
 ## Supported products
 
@@ -140,30 +150,42 @@ Product definitions live in `lib/productConfig.ts`. Leaf products below include 
 - Partner Insights → `/cra/check_report/partner_insights/get`
 - Cashflow Insights → `/cra/check_report/cashflow_insights/get`
 - Cashflow Updates → `/cra/monitoring_insights/get`
-
-### Link
-
-- **Update Mode** (Link only; no downstream calls)
+- **Upgrade Mode** (special CRA button at the bottom of the card; see [Upgrade Mode](#upgrade-mode))
 
 ## Settings toggles (feature flags)
 
-The **Settings** modal includes these toggles:
+The **Settings** modal is organized into three cards — **Flash**, **Link**, and **Advanced** — with each setting represented as a checkbox button. The webhook URL input sits below the cards. The top-right of the modal also has a light/dark theme toggle and a Docs shortcut. Available toggles:
 
-- **⚡️ Mode**: streamlined mode that skips some intermediate screens and runs faster through flows.
-- **Demo Mode**: connect once, then try multiple products without re-running Link every time.
+### Flash
+
+- **⚡️ Mode**: streamlined mode that skips some intermediate screens and runs faster through flows. When the wizard's post-Link picker is enabled, ⚡️ Mode applies per product run.
+- **Layer**: enables Plaid Layer flows (uses `/user/create` + `/session/token/create` and Layer `submit()` steps before Link opens). Requires a webhook URL. Mutually exclusive with the other Link-mode toggles below.
+- **Layer Identity Match**: enables Layer's identity-match step (only available when Layer is on).
+
+### Link
+
+The Link-mode toggles below are mutually exclusive — enabling one disables the others:
+
 - **Embedded Link**: runs Link using the embedded Link experience.
-- **Include phone_number in Link Token Create config**: adds `user.phone_number` (E.164) to Link token configs.
-- **Layer**: enables Plaid Layer flows (uses `/user/create` + `/session/token/create` and Layer `submit()` steps before Link opens). Requires a webhook URL.
-- **Use legacy user_token**: Switches between modern `user_id`/`identity` and legacy `user_token`/`consumer_report_user_identity` for `/user/create` calls
-- **Use ALT_PLAID_CLIENT_ID**: uses `ALT_PLAID_CLIENT_ID` + `ALT_PLAID_SECRET` for the session.
-- **Bypass Link**: uses Sandbox endpoints to create items without Link UI and go straight to downstream calls.
+- **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received. Requires a webhook URL.
 - **Multi-item Link**: enables `enable_multi_item_link: true`. Non-CRA flows use Plaid webhooks to capture `public_tokens[]` and includes an Item picker when multiple Items are added.
-- **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received.
-- **Remove items and users automatically** (default on): when you finish and return to the menu, automatically calls `/item/remove` (non-CRA) or `/user/remove` (CRA/hybrid). When off, deletion is skipped.
+- **Bypass Link**: uses Sandbox endpoints (`/sandbox/public_token/create`) to create items without Link UI and go straight to downstream calls.
+- **Update Mode**: when enabled, clicking **Start** in the wizard prompts you for an existing `access_token` / `user_id` / `user_token`, then opens Link in update mode against the selected products. See [Update Mode](#update-mode).
+
+Other Link-card settings:
+
+- **Include phone_number**: adds `user.phone_number` (E.164) to `/link/token/create` configs.
+- **Always call /user/create first**: forces a `/user/create` step on every flow, even non-CRA.
+
+### Advanced
+
+- **Use ALT_PLAID_CLIENT_ID**: uses `ALT_PLAID_CLIENT_ID` + `ALT_PLAID_SECRET` for the session.
+- **Use legacy user_token**: Switches between modern `user_id`/`identity` and legacy `user_token`/`consumer_report_user_identity` for `/user/create` calls.
+- **Auto-remove items & users** (default on): when you finish and return to the menu, automatically calls `/item/remove` (non-CRA) or `/user/remove` (CRA/hybrid). When off, deletion is skipped.
 
 ## Webhooks
 
-Several features (CRA, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks. When the app needs a webhook payload (e.g. `USER_CHECK_REPORT_READY` or `SESSION_FINISHED`), it will prompt you to paste the JSON payload.
+Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. When the app needs a webhook payload (e.g. `USER_CHECK_REPORT_READY` or `SESSION_FINISHED`), it will prompt you to paste the JSON payload.
 
 ## Testing
 

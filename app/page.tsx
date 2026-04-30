@@ -3,19 +3,19 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import Image from 'next/image';
-import LinkButton from '@/components/LinkButton';
 import Modal from '@/components/Modal';
-import ProductSelector from '@/components/ProductSelector';
+import ProductWizard, { WizardCard, WizardPill, WizardSubgroup } from '@/components/ProductWizard';
 import JsonHighlight from '@/components/JsonHighlight';
 import CodeEditor from '@uiw/react-textarea-code-editor';
-import SettingsToggle from '@/components/SettingsToggle';
+import SettingsPill from '@/components/SettingsPill';
 import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
-import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig } from '@/lib/productConfig';
+import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
+const THEME_STORAGE_KEY = 'plaid_flash_theme';
 const DEFAULT_LAYER_TEMPLATE_ID = 'template_5xk9wmaarmlp';
 const DEFAULT_LAYER_PHONE_NUMBER = '+14155550011';
 const DEFAULT_LAYER_DATE_OF_BIRTH = '1975-01-18';
@@ -42,12 +42,23 @@ type HybridStep =
 
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [showButton, setShowButton] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  // The Configuration Wizard (formerly the entry-flow ProductSelector) is the
+  // app's main menu. `showProductModal` controls whether it's visible. The
+  // wizard internally swaps to the post-Link "pick one" mode based on
+  // `demoLinkCompleted`.
   const [showProductModal, setShowProductModal] = useState(false);
-  const [showChildModal, setShowChildModal] = useState(false);
-  const [showGrandchildModal, setShowGrandchildModal] = useState(false);
+  // No-op stubs for removed states. The "Let's Go" button and the child /
+  // grandchild ProductSelector modals no longer exist; the wizard owns
+  // those concerns. Keeping these as constant `false` + no-op setters
+  // preserves the existing call sites without an exhaustive sweep.
+  const showButton = false;
+  const setShowButton = (_: boolean) => {};
+  const showChildModal = false;
+  const setShowChildModal = (_: boolean) => {};
+  const showGrandchildModal = false;
+  const setShowGrandchildModal = (_: boolean) => {};
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
@@ -118,12 +129,15 @@ export default function Home() {
   
   // Settings/Configuration state
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'flash' | 'link' | 'advanced'>('flash');
   const [zapMode, setZapMode] = useState(false);
   const [embeddedMode, setEmbeddedMode] = useState(false);
   const [layerMode, setLayerMode] = useState(false);
   const [layerIdentityMatchEnabled, setLayerIdentityMatchEnabled] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
+  // The wizard is now the entry point for every session, so we always run
+  // through the multi-product (formerly "Demo Mode") pipeline. Keeping a
+  // constant alias preserves the existing `demoMode`-gated branches across
+  // the file without touching each call site.
+  const demoMode = true;
   const [multiItemLinkEnabled, setMultiItemLinkEnabled] = useState(false);
   const [hostedLinkEnabled, setHostedLinkEnabled] = useState(false);
   const [autoRemoveEnabled, setAutoRemoveEnabled] = useState(true);
@@ -131,7 +145,6 @@ export default function Home() {
   const [tempEmbeddedMode, setTempEmbeddedMode] = useState(false);
   const [tempLayerMode, setTempLayerMode] = useState(false);
   const [tempLayerIdentityMatchEnabled, setTempLayerIdentityMatchEnabled] = useState(false);
-  const [tempDemoMode, setTempDemoMode] = useState(false);
   const [tempMultiItemLinkEnabled, setTempMultiItemLinkEnabled] = useState(false);
   const [tempHostedLinkEnabled, setTempHostedLinkEnabled] = useState(false);
   const [tempAutoRemoveEnabled, setTempAutoRemoveEnabled] = useState(true);
@@ -146,13 +159,23 @@ export default function Home() {
   const [tempAlwaysUserCreate, setTempAlwaysUserCreate] = useState(false);
   const [bypassLink, setBypassLink] = useState(false);
   const [tempBypassLink, setTempBypassLink] = useState(false);
+  // Update Mode (Settings → Link card). When enabled, clicking "Start" in
+  // the wizard routes through the update-mode-input modal first, then opens
+  // Link in update mode using the user-provided access_token plus the
+  // selected products' Link config.
+  const [updateModeEnabled, setUpdateModeEnabled] = useState(false);
+  const [tempUpdateModeEnabled, setTempUpdateModeEnabled] = useState(false);
+  // Mirror Update Mode state in a ref so memoized success/exchange callbacks
+  // (which only re-create on their own deps) always observe the latest value.
+  const updateModeEnabledRef = useRef(false);
   const [showZapResetButton, setShowZapResetButton] = useState(false);
   const [zapMobileStep, setZapMobileStep] = useState<'accounts' | 'product'>('accounts');
   
-  // Demo Mode state
+  // Wizard / sequential-runner state
+  // (formerly known as Demo Mode; the runner pipeline always runs now since
+  // the wizard is the entry point for every session.)
   const [demoLinkCompleted, setDemoLinkCompleted] = useState(false);
   const [demoAccessToken, setDemoAccessToken] = useState<string | null>(null);
-  const [showDemoProductsModal, setShowDemoProductsModal] = useState(false);
   const [demoProductsVisibility, setDemoProductsVisibility] = useState<Record<string, boolean>>({});
   const [isDemoModeStarting, setIsDemoModeStarting] = useState(false);
   const [demoPendingLinkTokenConfig, setDemoPendingLinkTokenConfig] = useState<any>(null);
@@ -196,6 +219,9 @@ export default function Home() {
   const [webhookUrlOverride, setWebhookUrlOverride] = useState<string>('');
   const [tempWebhookUrlOverride, setTempWebhookUrlOverride] = useState<string>('');
 
+  // Theme state (light/dark) - applied live via [data-theme] on the <html> element
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
   const linkTokenRef = useRef<string | null>(null);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -218,6 +244,10 @@ export default function Home() {
   useEffect(() => {
     accessTokenRef.current = accessToken;
   }, [accessToken]);
+
+  useEffect(() => {
+    updateModeEnabledRef.current = updateModeEnabled;
+  }, [updateModeEnabled]);
 
   // Hybrid CRA + non-CRA flow state (CRA product selected but Link config includes non-CRA products)
   const [hybridModeActive, setHybridModeActive] = useState(false);
@@ -299,7 +329,6 @@ export default function Home() {
     embeddedMode ||
     layerMode ||
     layerIdentityMatchEnabled ||
-    demoMode ||
     multiItemLinkEnabled ||
     hostedLinkEnabled ||
     !autoRemoveEnabled ||
@@ -368,6 +397,110 @@ export default function Home() {
     [effectiveWebhookConfigUrl, layerMode, useLegacyUserToken]
   );
 
+  // Build the Configuration Wizard's card-and-pills structure from the
+  // product config tree. Each top-level parent (excluding the link/* tree)
+  // becomes a card. Within a card:
+  //   - level-2 children that are themselves leaves render as direct pills
+  //     (e.g. Payments → Auth, Investments Move).
+  //   - level-2 children with their own (grand)children render as a
+  //     subgroup whose label is the child's name and whose pills are the
+  //     leaves underneath (e.g. Payments → Signal → [Evaluate, Balance]).
+  // Selection state is sourced from `demoProductsVisibility`; disable info
+  // is sourced from `getProductDisableInfo`.
+  const wizardCards: WizardCard[] = useMemo(() => {
+    const isLinkLike = (id: string) => id === 'link' || id.startsWith('link-');
+    const toPill = (leaf: ProductConfig): WizardPill => {
+      const disableInfo = getProductDisableInfo(leaf.id);
+      return {
+        id: leaf.id,
+        label: leaf.shortName || leaf.name,
+        selected: !!demoProductsVisibility[leaf.id],
+        disabled: disableInfo.disabled,
+        disabledReason: 'reason' in disableInfo ? disableInfo.reason : undefined,
+      };
+    };
+
+    return PRODUCTS_ARRAY
+      .filter((p) => !isLinkLike(p.id))
+      .map((parent) => {
+        const directPills: WizardPill[] = [];
+        const subgroups: WizardSubgroup[] = [];
+        const bottomPills: WizardPill[] = [];
+
+        const childrenForLayout = parent.children && parent.children.length > 0
+          ? parent.children
+          : [parent];
+
+        for (const child of childrenForLayout) {
+          if (isLinkLike(child.id)) continue;
+
+          if (child.children && child.children.length > 0) {
+            const grandLeaves = child.children
+              .filter((gc) => !isLinkLike(gc.id))
+              .flatMap((gc) => collectLeafConfigs(gc))
+              .filter((leaf) => !isLinkLike(leaf.id));
+
+            if (grandLeaves.length > 0) {
+              subgroups.push({
+                id: child.id,
+                name: child.shortName || child.name,
+                pills: grandLeaves.map(toPill),
+              });
+            }
+          } else if (child.apiEndpoint) {
+            directPills.push(toPill(child));
+          }
+        }
+
+        // CRA-only: Upgrade Mode is its own special leaf (no apiEndpoint, no
+        // products array) that has its own dedicated downstream flow. Render
+        // it as a `bottomPill` so it anchors to the bottom of the CRA card,
+        // visually separated from the structured CRA product list above.
+        if (parent.id === 'cra') {
+          const upgradeCfg = getProductConfigById('link-upgrade-mode');
+          if (upgradeCfg) bottomPills.push(toPill(upgradeCfg));
+        }
+
+        return {
+          id: parent.id,
+          name: parent.name,
+          icon: parent.icon,
+          pills: directPills,
+          subgroups,
+          bottomPills,
+        };
+      });
+  }, [demoProductsVisibility, getProductDisableInfo]);
+
+  // Filter the wizard cards down to just the leaves the user enabled
+  // pre-Link. Used in `pick` mode after Link is completed. Upgrade Mode
+  // owns its own post-Link branch (`upgrade-mode-pick-product` modal), so
+  // it never reappears in the picker even when selected pre-Link.
+  const wizardPickerCards: WizardCard[] = useMemo(() => {
+    const visible = (pill: WizardPill) =>
+      !!demoProductsVisibility[pill.id] && pill.id !== 'link-upgrade-mode';
+    return wizardCards
+      .map((card) => ({
+        ...card,
+        pills: card.pills.filter(visible),
+        subgroups: card.subgroups
+          .map((sg) => ({ ...sg, pills: sg.pills.filter(visible) }))
+          .filter((sg) => sg.pills.length > 0),
+        bottomPills: (card.bottomPills ?? []).filter(visible),
+      }))
+      .filter(
+        (card) =>
+          card.pills.length > 0 ||
+          card.subgroups.length > 0 ||
+          (card.bottomPills?.length ?? 0) > 0
+      );
+  }, [wizardCards, demoProductsVisibility]);
+
+  const hasAnyEnabledLeaf = useMemo(
+    () => Object.values(demoProductsVisibility).some(Boolean),
+    [demoProductsVisibility]
+  );
+
   // Helper function to build API request body with product-specific params
   const buildProductRequestBody = (
     baseParams: Record<string, any>,
@@ -408,45 +541,28 @@ export default function Home() {
     return requestBody;
   };
 
-  // Initialize all products as visible for Demo Mode
-  const initializeProductVisibility = () => {
-    const visibility: Record<string, boolean> = {};
-    PRODUCTS_ARRAY.forEach(product => {
-      visibility[product.id] = true;
-      if (product.children) {
-        product.children.forEach(child => {
-          visibility[child.id] = true;
-        });
-      }
-    });
-    return visibility;
-  };
-
-  // Don't fetch link token on mount - wait for product selection
-  // useEffect removed - link token fetched after product selection
-
   // Welcome animation sequence
   useEffect(() => {
     // Only run if showWelcome is true (on natural page load)
     if (!showWelcome) {
-      // If welcome is already false, show button immediately
-      setShowButton(true);
+      // If welcome is already false, surface the wizard immediately
+      setShowProductModal(true);
       return;
     }
 
-    // Remove welcome text after animation completes (5 seconds)
+    // Remove welcome text after animation completes
     const welcomeTimer = setTimeout(() => {
       setShowWelcome(false);
     }, 2800);
 
-    // Show button after welcome fades out (5 seconds total)
-    const buttonTimer = setTimeout(() => {
-      setShowButton(true);
-    }, 5000);
+    // Show the wizard main menu shortly after the welcome fades out
+    const wizardTimer = setTimeout(() => {
+      setShowProductModal(true);
+    }, 3200);
 
     return () => {
       clearTimeout(welcomeTimer);
-      clearTimeout(buttonTimer);
+      clearTimeout(wizardTimer);
     };
   }, [showWelcome]);
 
@@ -468,6 +584,23 @@ export default function Home() {
       // Ignore storage errors (privacy mode, etc.)
     }
   }, []);
+
+  // Hydrate theme preference from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved === 'light' || saved === 'dark') {
+        setTheme(saved);
+      }
+    } catch {
+      // Ignore storage errors (privacy mode, etc.)
+    }
+  }, []);
+
+  // Reflect the current theme on <html data-theme="..."> so the CSS variables flip
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   // Load credential mode (cookie-backed) + availability
   useEffect(() => {
@@ -585,68 +718,43 @@ export default function Home() {
     }
   };
 
-  const handleProductSelect = (productId: string) => {
-    const productConfig = PRODUCT_CONFIGS[productId];
-    
-    // If product has children, show child selection modal
-    if (productConfig?.children && productConfig.children.length > 0) {
-      setSelectedProduct(productId);
-      setShowProductModal(false);
-      setShowChildModal(true);
-    } else {
-      // Direct product
-      setSelectedProduct(productId);
-      setSelectedChildProduct(null);
-      setSelectedGrandchildProduct(null);
-      setShowProductModal(false);
-      
-      // If in Demo Mode with Link completed, call API directly
-      if (demoLinkCompleted) {
-        handleDemoModeApiCall(productId);
-      } else {
-        // Normal mode: show preview modal
-        showLinkConfigPreview(productId);
+  // Find a leaf's location in the product tree so the existing per-product
+  // API code paths (which key off selectedProduct/Child/Grandchild) keep
+  // working when the wizard's "pick" mode hands us a leaf id.
+  const setSelectionForLeaf = (leafId: string) => {
+    for (const top of PRODUCTS_ARRAY) {
+      if (top.id === leafId) {
+        setSelectedProduct(leafId);
+        setSelectedChildProduct(null);
+        setSelectedGrandchildProduct(null);
+        return;
+      }
+      for (const child of top.children || []) {
+        if (child.id === leafId) {
+          setSelectedProduct(top.id);
+          setSelectedChildProduct(leafId);
+          setSelectedGrandchildProduct(null);
+          return;
+        }
+        for (const gc of child.children || []) {
+          if (gc.id === leafId) {
+            setSelectedProduct(top.id);
+            setSelectedChildProduct(child.id);
+            setSelectedGrandchildProduct(leafId);
+            return;
+          }
+        }
       }
     }
   };
 
-  const handleChildProductSelect = (childId: string) => {
-    // Get the child config to check if it has grandchildren
-    const parentConfig = PRODUCT_CONFIGS[selectedProduct!];
-    const childConfig = parentConfig?.children?.find(c => c.id === childId);
-    
-    // If child has grandchildren (3rd level), show grandchild modal
-    if (childConfig?.children && childConfig.children.length > 0) {
-      setSelectedChildProduct(childId);
-      setShowChildModal(false);
-      setShowGrandchildModal(true);
-    } else {
-      // No grandchildren - this is a leaf product
-      setSelectedChildProduct(childId);
-      setSelectedGrandchildProduct(null);
-      setShowChildModal(false);
-      
-      // If in Demo Mode with Link completed, call API directly
-      if (demoLinkCompleted) {
-        handleDemoModeApiCall(childId);
-      } else {
-        // Normal mode: show preview modal
-        showLinkConfigPreview(childId);
-      }
-    }
-  };
-
-  const handleGrandchildProductSelect = (grandchildId: string) => {
-    setSelectedGrandchildProduct(grandchildId);
-    setShowGrandchildModal(false);
-    
-    // If in Demo Mode with Link completed, call API directly
-    if (demoLinkCompleted) {
-      handleDemoModeApiCall(grandchildId);
-    } else {
-      // Normal mode: show preview modal
-      showLinkConfigPreview(grandchildId);
-    }
+  // Wizard "pick" mode click handler: post-Link, the user picks an enabled
+  // leaf to run individually. Routes through today's per-leaf API runner
+  // (which already honors zapMode internally).
+  const handleRunLeafProduct = (leafId: string) => {
+    setSelectionForLeaf(leafId);
+    setShowProductModal(false);
+    handleDemoModeApiCall(leafId);
   };
 
   const createLayerSessionToken = useCallback(
@@ -2374,15 +2482,24 @@ export default function Home() {
     }
   };
 
+  // Theme toggle: applied + persisted live (no temp/Save round-trip)
+  const handleToggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage errors (privacy mode, etc.)
+    }
+  };
+
   // Settings Modal Handlers
   const handleOpenSettings = () => {
     // Copy current settings to temp state
-    setSettingsTab('flash');
     setTempZapMode(zapMode);
     setTempEmbeddedMode(embeddedMode);
     setTempLayerMode(layerMode);
     setTempLayerIdentityMatchEnabled(layerIdentityMatchEnabled);
-    setTempDemoMode(demoMode);
     setTempMultiItemLinkEnabled(multiItemLinkEnabled);
     setTempHostedLinkEnabled(hostedLinkEnabled);
     setTempAutoRemoveEnabled(autoRemoveEnabled);
@@ -2391,34 +2508,24 @@ export default function Home() {
     setTempIncludePhoneNumber(includePhoneNumber);
     setTempAlwaysUserCreate(alwaysUserCreate);
     setTempBypassLink(bypassLink);
+    setTempUpdateModeEnabled(updateModeEnabled);
     setTempWebhookUrlOverride(webhookUrlOverride);
-    // Hide product modal and show settings modal
+    // Hide the wizard while the settings modal is open
     setShowProductModal(false);
-    setShowChildModal(false);
     setShowSettingsModal(true);
   };
 
   const handleCancelSettings = () => {
-    // Discard changes and close settings modal
+    // Discard changes and return to the wizard main menu
     setShowSettingsModal(false);
-    // Restore the appropriate product modal
-    if (selectedProduct && PRODUCT_CONFIGS[selectedProduct]?.children && selectedChildProduct) {
-      setShowChildModal(true);
-    } else {
-      setShowProductModal(true);
-    }
+    setShowProductModal(true);
   };
 
   const handleSaveSettings = async () => {
-    // Commit temp state to main state
-    const wasDemoMode = demoMode;
-    const willBeDemoMode = tempDemoMode;
-    
     setZapMode(tempZapMode);
     setEmbeddedMode(tempEmbeddedMode);
     setLayerMode(tempLayerMode);
     setLayerIdentityMatchEnabled(tempLayerIdentityMatchEnabled);
-    setDemoMode(tempDemoMode);
     setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
     setHostedLinkEnabled(tempHostedLinkEnabled);
     setAutoRemoveEnabled(tempAutoRemoveEnabled);
@@ -2444,6 +2551,7 @@ export default function Home() {
     setIncludePhoneNumber(tempIncludePhoneNumber);
     setAlwaysUserCreate(tempAlwaysUserCreate);
     setBypassLink(tempBypassLink);
+    setUpdateModeEnabled(tempUpdateModeEnabled);
 
     // Persist webhook URL to localStorage
     const trimmedWebhookOverride = tempWebhookUrlOverride.trim();
@@ -2458,34 +2566,19 @@ export default function Home() {
       // Ignore storage errors (privacy mode, etc.)
     }
     
-    // Close settings modal
+    // Close settings modal and restore the wizard
     setShowSettingsModal(false);
-    
-    // If Demo Mode is enabled and Link not yet completed, show product selector modal
-    if (willBeDemoMode && !demoLinkCompleted) {
-      setDemoProductsVisibility(initializeProductVisibility());
-      setShowDemoProductsModal(true);
-    } else {
-      // Otherwise restore the appropriate product modal
-      if (selectedProduct && PRODUCT_CONFIGS[selectedProduct]?.children && selectedChildProduct) {
-        setShowChildModal(true);
-      } else {
-        setShowProductModal(true);
-      }
-    }
+    setShowProductModal(true);
   };
 
   const handleToggleZap = () => {
-    const newValue = !tempZapMode;
-    setTempZapMode(newValue);
-    // Zap and Demo are mutually exclusive
-    if (newValue) {
-      setTempDemoMode(false);
-    }
+    setTempZapMode(!tempZapMode);
   };
 
   const handleToggleEmbedded = () => {
-    setTempEmbeddedMode(!tempEmbeddedMode);
+    const next = !tempEmbeddedMode;
+    setTempEmbeddedMode(next);
+    if (next) setTempUpdateModeEnabled(false);
   };
 
   const handleToggleAlwaysUserCreate = () => {
@@ -2507,6 +2600,7 @@ export default function Home() {
       setTempHostedLinkEnabled(false);
       setTempMultiItemLinkEnabled(false);
       setTempBypassLink(false);
+      setTempUpdateModeEnabled(false);
       setTempUseAltCredentials(true);
     } else {
       // Turning Layer off: also turn off Layer-only subfeatures.
@@ -2519,21 +2613,16 @@ export default function Home() {
     setTempLayerIdentityMatchEnabled(!tempLayerIdentityMatchEnabled);
   };
 
-  const handleToggleDemo = () => {
-    const newValue = !tempDemoMode;
-    setTempDemoMode(newValue);
-    // Zap and Demo are mutually exclusive
-    if (newValue) {
-      setTempZapMode(false);
-    }
-  };
-
   const handleToggleMultiItemLink = () => {
-    setTempMultiItemLinkEnabled(!tempMultiItemLinkEnabled);
+    const next = !tempMultiItemLinkEnabled;
+    setTempMultiItemLinkEnabled(next);
+    if (next) setTempUpdateModeEnabled(false);
   };
 
   const handleToggleHostedLink = () => {
-    setTempHostedLinkEnabled(!tempHostedLinkEnabled);
+    const next = !tempHostedLinkEnabled;
+    setTempHostedLinkEnabled(next);
+    if (next) setTempUpdateModeEnabled(false);
   };
 
   const parseHostedLinkSessionFinished = (payloadText: string) => {
@@ -2567,78 +2656,45 @@ export default function Home() {
   };
 
   const handleToggleBypassLink = () => {
-    setTempBypassLink(!tempBypassLink);
+    const next = !tempBypassLink;
+    setTempBypassLink(next);
+    if (next) setTempUpdateModeEnabled(false);
   };
 
-  const handleToggleDemoProduct = (productId: string) => {
-    setDemoProductsVisibility(prevVisibility => {
-      const newVisibility = { ...prevVisibility };
-      const currentValue = newVisibility[productId];
-      const newValue = !currentValue;
-      
-      // Find if this is a parent or child product
-      const parentProduct = PRODUCTS_ARRAY.find(p => p.id === productId);
-      const isParent = !!parentProduct;
-      
-      if (isParent) {
-        // Toggle parent
-        newVisibility[productId] = newValue;
-        
-        // Cascade to children
-        if (parentProduct.children) {
-          parentProduct.children.forEach(child => {
-            newVisibility[child.id] = newValue;
-          });
-        }
-      } else {
-        // This is a child - find its parent
-        const parent = PRODUCTS_ARRAY.find(p => 
-          p.children?.some(c => c.id === productId)
-        );
-        
-        if (parent) {
-          // Toggle the child
-          newVisibility[productId] = newValue;
-          
-          if (newValue) {
-            // If enabling a child, enable parent
-            newVisibility[parent.id] = true;
-          } else {
-            // If disabling a child, check if all siblings are disabled
-            const allChildrenDisabled = parent.children?.every(
-              child => !newVisibility[child.id]
-            );
-            
-            if (allChildrenDisabled) {
-              newVisibility[parent.id] = false;
-            }
-          }
-        }
-      }
-      
-      return newVisibility;
-    });
-  };
-
-  const handleDemoProductsGo = () => {
-    // Validate at least one product is enabled
-    const hasEnabledProduct = Object.values(demoProductsVisibility).some(v => v);
-    
-    if (!hasEnabledProduct) {
-      return; // Button should be disabled, but extra safety check
+  const handleToggleUpdateMode = () => {
+    const next = !tempUpdateModeEnabled;
+    setTempUpdateModeEnabled(next);
+    if (next) {
+      // Update Mode is its own Link mode — incompatible with the others.
+      setTempLayerMode(false);
+      setTempLayerIdentityMatchEnabled(false);
+      setTempEmbeddedMode(false);
+      setTempHostedLinkEnabled(false);
+      setTempMultiItemLinkEnabled(false);
+      setTempBypassLink(false);
     }
-    
-    // Close the products modal
-    setShowDemoProductsModal(false);
-    
-    // Start the Demo Mode flow
-    handleDemoModeStart();
   };
 
-  const handleCancelDemoProducts = () => {
-    // Close products modal and return to settings
-    setShowDemoProductsModal(false);
-    setShowSettingsModal(true);
+  // Wizard pill toggle: pills are always leaves, so just flip the bit.
+  const handleToggleWizardLeaf = (leafId: string) => {
+    setDemoProductsVisibility((prev) => ({ ...prev, [leafId]: !prev[leafId] }));
+  };
+
+  // Wizard "Start" button: hide the wizard before kicking off the runner
+  // pipeline so it doesn't sit visible underneath the link/preview modals.
+  // When Update Mode is enabled in Settings, divert through the existing
+  // update-mode-input modal first to collect the user's access_token (or
+  // user_token / user_id); the modal's confirm handler then continues with
+  // the selected products and the user-supplied token.
+  const handleWizardStart = () => {
+    setShowProductModal(false);
+    if (updateModeEnabled) {
+      setUpdateModeAccessTokenInput('');
+      setModalState('update-mode-input');
+      setShowModal(true);
+      return;
+    }
+    handleDemoModeStart();
   };
 
   const handleZapModeSuccess = useCallback(async (public_token: string, metadata: any) => {
@@ -2647,25 +2703,17 @@ export default function Home() {
     setShowModal(true);
 
     try {
-      // Exchange public token for access token
-      const exchangeResponse = await fetch('/api/exchange-public-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ public_token }),
-      });
-      
-      if (!exchangeResponse.ok) {
-        const errorData = await exchangeResponse.json();
-        setErrorData(errorData);
-        setApiStatusCode(exchangeResponse.status);
+      // Exchange public_token for access_token (skipped under Update Mode,
+      // where the user already supplied an access_token via the input modal).
+      const exchangeResult = await exchangeOrReuseAccessToken(public_token);
+      if (!exchangeResult.ok) {
+        setErrorData(exchangeResult.errorData);
+        setApiStatusCode(exchangeResult.status);
         setModalState('api-error');
         setShowModal(true);
         return;
       }
-
-      const { access_token } = await exchangeResponse.json();
+      const { access_token } = exchangeResult;
       setAccessToken(access_token);
 
       // Get the effective product ID (child if selected, otherwise parent)
@@ -2803,6 +2851,31 @@ export default function Home() {
 
   const handleBypassLinkSuccess = async (public_token: string) => {
     try {
+      // Demo Mode bootstrap: in the wizard flow no specific product is
+      // pre-selected. Exchange the sandbox public_token (or reuse the
+      // user-provided access_token under Update Mode) and surface the
+      // post-Link picker so the user can pick which product to run.
+      if (demoMode && !demoLinkCompleted) {
+        setModalState('processing-accounts');
+        setShowModal(true);
+        const exchangeResult = await exchangeOrReuseAccessToken(public_token);
+        if (!exchangeResult.ok) {
+          setErrorData(exchangeResult.errorData);
+          setApiStatusCode(exchangeResult.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+        const { access_token } = exchangeResult;
+        accessTokenRef.current = access_token;
+        setAccessToken(access_token);
+        setDemoAccessToken(access_token);
+        setDemoLinkCompleted(true);
+        setShowModal(false);
+        setShowProductModal(true);
+        return;
+      }
+
       // Get the effective product ID
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
@@ -3145,21 +3218,16 @@ export default function Home() {
         setModalState('processing-accounts');
         setShowModal(true);
 
-        const exchangeResponse = await fetch('/api/exchange-public-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ public_token }),
-        });
-        const exchangeJson = await exchangeResponse.json();
-        if (!exchangeResponse.ok) {
-          setErrorData(exchangeJson);
-          setApiStatusCode(exchangeResponse.status);
+        const exchangeResult = await exchangeOrReuseAccessToken(public_token);
+        if (!exchangeResult.ok) {
+          setErrorData(exchangeResult.errorData);
+          setApiStatusCode(exchangeResult.status);
           setModalState('api-error');
           setShowModal(true);
           return;
         }
 
-        const access_token: string = exchangeJson.access_token;
+        const access_token: string = exchangeResult.access_token;
         accessTokenRef.current = access_token;
         setAccessToken(access_token);
         setDemoAccessToken(access_token);
@@ -3365,28 +3433,21 @@ export default function Home() {
             throw new Error('Missing public_token for token exchange');
           }
 
-          // Exchange public token for access token
+          // Exchange public_token for access_token (Update Mode reuses the
+          // user-provided token and skips the network round-trip).
           setModalState('processing-accounts');
           setShowModal(true);
 
-          const exchangeResponse = await fetch('/api/exchange-public-token', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ public_token }),
-          });
-
-          const exchangeJson = await exchangeResponse.json();
-          if (!exchangeResponse.ok) {
-            setErrorData(exchangeJson);
-            setApiStatusCode(exchangeResponse.status);
+          const exchangeResult = await exchangeOrReuseAccessToken(public_token);
+          if (!exchangeResult.ok) {
+            setErrorData(exchangeResult.errorData);
+            setApiStatusCode(exchangeResult.status);
             setModalState('api-error');
             setShowModal(true);
             return;
           }
 
-          const access_token: string = exchangeJson.access_token;
+          const access_token: string = exchangeResult.access_token;
           accessTokenRef.current = access_token;
           setAccessToken(access_token);
 
@@ -3638,24 +3699,17 @@ export default function Home() {
     try {
       const { public_token } = callbackData;
 
-      // Exchange public token for access token
-      const exchangeResponse = await fetch('/api/exchange-public-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ public_token }),
-      });
-      
-      if (!exchangeResponse.ok) {
-        const errorData = await exchangeResponse.json();
-        setErrorData(errorData);
-        setApiStatusCode(exchangeResponse.status);
+      // Exchange public_token for access_token (skipped under Update Mode,
+      // where the user already supplied an access_token via the input modal).
+      const exchangeResult = await exchangeOrReuseAccessToken(public_token);
+      if (!exchangeResult.ok) {
+        setErrorData(exchangeResult.errorData);
+        setApiStatusCode(exchangeResult.status);
         setModalState('api-error');
         return;
       }
 
-      const { access_token } = await exchangeResponse.json();
+      const { access_token } = exchangeResult;
 
       // Store access token for cleanup
       accessTokenRef.current = access_token;
@@ -4339,22 +4393,20 @@ export default function Home() {
     }
   }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showChildModal, showGrandchildModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
 
-  const handleButtonClick = () => {
-    // Show product selection modal instead of opening Link directly
-    setShowButton(false);
-    setShowProductModal(true);
-  };
-
-  const handleDemoModeStart = async () => {
+  // Walk the wizard's `demoProductsVisibility` selections, expand them to
+  // their leaf configs, and aggregate the union of `products` /
+  // `required_if_supported` / `additionalLinkParams` across all selected
+  // leaves. Shared by `handleDemoModeStart` and the Update Mode confirm
+  // handler so both paths build their /link/token/create payload from the
+  // same source of truth.
+  const resolveSelectedLinkProducts = () => {
     const enabledProductIds = Object.keys(demoProductsVisibility).filter(
       (id) => demoProductsVisibility[id] && id !== 'link' && !id.startsWith('link-')
     );
 
-    const collectLeafConfigs = (cfg: ProductConfig): ProductConfig[] => {
-      if (!cfg.children || cfg.children.length === 0) {
-        return [cfg];
-      }
-      return cfg.children.flatMap(collectLeafConfigs);
+    const collectLeaves = (cfg: ProductConfig): ProductConfig[] => {
+      if (!cfg.children || cfg.children.length === 0) return [cfg];
+      return cfg.children.flatMap(collectLeaves);
     };
 
     const hasAnyEnabledDescendant = (cfg: ProductConfig): boolean => {
@@ -4366,25 +4418,22 @@ export default function Home() {
       return false;
     };
 
-    // Expand selected IDs into leaf configs (parents → descendants, children-with-grandchildren → grandchildren, etc.)
     const leafConfigsById = new Map<string, ProductConfig>();
     for (const id of enabledProductIds) {
       const cfg = getProductConfigById(id);
       if (!cfg) continue;
-      // If a parent was auto-selected due to selecting a descendant, treat it as UI-only and
-      // do not expand it into "select all leaves".
+      // If a parent was auto-selected due to selecting a descendant, treat
+      // it as UI-only and do not expand it into "select all leaves".
       if (cfg.children && cfg.children.length > 0 && hasAnyEnabledDescendant(cfg)) {
         continue;
       }
-      for (const leaf of collectLeafConfigs(cfg)) {
-        // Ignore Link pseudo-products in Demo Mode defensively
+      for (const leaf of collectLeaves(cfg)) {
         if (leaf.id === 'link' || leaf.id.startsWith('link-')) continue;
         leafConfigsById.set(leaf.id, leaf);
       }
     }
     const selectedLeafConfigs = Array.from(leafConfigsById.values());
 
-    // Build products[] for /link/token/create from all enabled leaf configs
     const productsSet = new Set<string>();
     let mergedAdditionalLinkParams: Record<string, any> = {};
     for (const leaf of selectedLeafConfigs) {
@@ -4399,7 +4448,53 @@ export default function Home() {
       }
     }
     const products = Array.from(productsSet);
-    const includesCra = products.some((p) => p.startsWith('cra_')) || selectedLeafConfigs.some((c) => !!c.isCRA);
+    const includesCra =
+      products.some((p) => p.startsWith('cra_')) || selectedLeafConfigs.some((c) => !!c.isCRA);
+
+    return { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra };
+  };
+
+  // Update Mode bypasses the public_token -> access_token exchange because
+  // the user already supplied an access_token in the update-mode-input modal
+  // (which we stored via setAccessToken). For every other flow this falls
+  // through to the normal /api/exchange-public-token call. Returns a tagged
+  // result so call sites can handle the error path uniformly. Both reads
+  // are via refs to stay correct inside memoized success callbacks.
+  const exchangeOrReuseAccessToken = useCallback(async (
+    public_token: string
+  ): Promise<
+    | { ok: true; access_token: string }
+    | { ok: false; errorData: any; status: number }
+  > => {
+    if (updateModeEnabledRef.current && accessTokenRef.current) {
+      return { ok: true, access_token: accessTokenRef.current };
+    }
+    const resp = await fetch('/api/exchange-public-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public_token }),
+    });
+    if (!resp.ok) {
+      const errorData = await resp.json().catch(() => ({}));
+      return { ok: false, errorData, status: resp.status };
+    }
+    const json = await resp.json();
+    return { ok: true, access_token: json.access_token as string };
+  }, []);
+
+  const handleDemoModeStart = async () => {
+    // Upgrade Mode owns its own dedicated end-to-end flow (showLinkConfigPreview
+    // already handles /user/create, the upgrade-link cfg build, and post-Link
+    // routing through the upgrade-mode-pick-product modal). When the user has
+    // it toggled on in the wizard, hand off to that flow and ignore any other
+    // selections — Upgrade Mode is its own branch.
+    if (demoProductsVisibility['link-upgrade-mode']) {
+      showLinkConfigPreview('link-upgrade-mode');
+      return;
+    }
+
+    const { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra } =
+      resolveSelectedLinkProducts();
 
     // CRA in Demo Mode requires a webhook URL (so we can wait for readiness later)
     if (includesCra && !effectiveWebhookConfigUrl) {
@@ -4411,6 +4506,54 @@ export default function Home() {
       setModalState('api-error');
       setShowModal(true);
       setShowWelcome(false);
+      return;
+    }
+
+    // Bypass Link mode: skip /link/token/create entirely and create a sandbox
+    // public_token directly so the rest of the demo flow (post-Link picker,
+    // per-product API calls) runs against the resulting access_token. CRA-only
+    // demo selections still go through /user/create + Link below — Bypass Link
+    // applies to non-CRA demo selections only.
+    if (bypassLink && !includesCra) {
+      const sandboxInitialProducts = new Set<string>();
+      const mergedSandboxParams: Record<string, any> = { options: {} };
+      for (const leaf of selectedLeafConfigs) {
+        const leafSandboxProducts = leaf.sandboxProducts || leaf.products || [];
+        for (const p of leafSandboxProducts) {
+          if (typeof p === 'string' && p) sandboxInitialProducts.add(p);
+        }
+        const params = leaf.additionalSandboxCreateParams;
+        if (!params || typeof params !== 'object') continue;
+        for (const key of Object.keys(params)) {
+          if (key === 'options' && typeof (params as any).options === 'object') {
+            mergedSandboxParams.options = {
+              ...mergedSandboxParams.options,
+              ...(params as any).options,
+            };
+          } else {
+            mergedSandboxParams[key] = (params as any)[key];
+          }
+        }
+      }
+
+      const sandboxFullConfig: any = {
+        institution_id: 'ins_109511',
+        initial_products: Array.from(sandboxInitialProducts),
+        ...mergedSandboxParams,
+        options: { ...(mergedSandboxParams.options || {}) },
+      };
+      if (effectiveWebhookConfigUrl) {
+        sandboxFullConfig.options.webhook = effectiveWebhookConfigUrl;
+      }
+
+      setSandboxConfig(sandboxFullConfig);
+      setIsDemoModeStarting(true);
+      if (zapMode) {
+        handleProceedWithBypassLink(sandboxFullConfig);
+      } else {
+        setModalState('preview-sandbox-config');
+        setShowModal(true);
+      }
       return;
     }
 
@@ -4428,7 +4571,7 @@ export default function Home() {
     };
 
     // Only include transactions config when transactions is selected
-    if (productsSet.has('transactions')) {
+    if (products.includes('transactions')) {
       demoConfig.transactions = { days_requested: 14 };
     }
 
@@ -4526,12 +4669,11 @@ export default function Home() {
       setErrorData(null);
       setErrorMessage('');
 
-      // Reset Demo Mode state completely
-      setDemoMode(false);
+      // Reset session state but preserve the user's product selection so
+      // the wizard reopens with the same pills checked (better UX for a
+      // "Reset Session" affordance than wiping their intent).
       setDemoLinkCompleted(false);
       setDemoAccessToken(null);
-      setShowDemoProductsModal(false);
-      setDemoProductsVisibility({});
 
       // Reset CRA state
       setUserCreateConfig(null);
@@ -4635,12 +4777,11 @@ export default function Home() {
     setErrorData(null);
     setErrorMessage('');
     
-    // Reset Demo Mode state completely
-    setDemoMode(false);
+    // Reset session state but preserve the user's product selection so
+    // the wizard reopens with the same pills checked (better UX for a
+    // "Reset Session" affordance than wiping their intent).
     setDemoLinkCompleted(false);
     setDemoAccessToken(null);
-    setShowDemoProductsModal(false);
-    setDemoProductsVisibility({});
     
     // Reset CRA state
     setUserCreateConfig(null);
@@ -5763,10 +5904,10 @@ export default function Home() {
               style={{
                 width: '100%',
                 minHeight: 110,
-                background: 'rgba(0, 0, 0, 0.25)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
                 borderRadius: 12,
-                color: 'rgba(255, 255, 255, 0.9)',
+                color: 'var(--input-text)',
                 padding: 12,
                 fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
                 fontSize: 12,
@@ -5827,6 +5968,31 @@ export default function Home() {
                 } else if (detectedType === 'user_id') {
                   cfg.user_id = value;
                   cfg.update = { user: true };
+                }
+
+                // When invoked via the Settings → Update Mode toggle, fold in
+                // the wizard's selected products so /link/token/create is
+                // built with the same product list a normal Start would use.
+                // Also seed the auth state (access_token / user_token / user_id)
+                // from the user's input so downstream API calls can run without
+                // exchanging a public_token.
+                if (updateModeEnabled) {
+                  const { products: selectedProducts, mergedAdditionalLinkParams } =
+                    resolveSelectedLinkProducts();
+                  if (selectedProducts.length > 0) {
+                    cfg.products = selectedProducts;
+                    if (selectedProducts.includes('transactions')) {
+                      cfg.transactions = { days_requested: 14 };
+                    }
+                  }
+                  Object.assign(cfg, mergedAdditionalLinkParams);
+                  if (detectedType === 'access_token') {
+                    setAccessToken(value);
+                  } else if (detectedType === 'user_token') {
+                    setUserToken(value);
+                  } else if (detectedType === 'user_id') {
+                    setUserId(value);
+                  }
                 }
 
                 // Respect Hosted Link setting: use Hosted Link if enabled (completion via LINK/SESSION_FINISHED)
@@ -6485,7 +6651,7 @@ export default function Home() {
               </select>
             )}
             {demoLinkCompleted && (
-              <button className="reset-icon-button" onClick={handleStartOver} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+              <button className="reset-icon-button icon-button-red" onClick={handleStartOver} title="Reset Session">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
                 </svg>
@@ -6643,10 +6809,10 @@ export default function Home() {
                   style={{
                     width: '100%',
                     minHeight: 220,
-                    background: 'rgba(0, 0, 0, 0.25)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
                     borderRadius: 12,
-                    color: 'rgba(255, 255, 255, 0.9)',
+                    color: 'var(--input-text)',
                     padding: 12,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
                     fontSize: 12,
@@ -6679,7 +6845,13 @@ export default function Home() {
                 {isCraReportWaiting && (
                   <button
                     className="action-button button-gray"
-                    onClick={returnToProductMenuNoRemove}
+                    onClick={() => {
+                      if (isUpgradeMode) {
+                        handleUpgradeModeReportReadyForward();
+                      } else {
+                        handleCraLayerReportReadyForward();
+                      }
+                    }}
                   >
                     Skip
                   </button>
@@ -6907,7 +7079,7 @@ export default function Home() {
             <div className="error-icon-large">⚠️</div>
             <h2>API Error Response</h2>
             {apiStatusCode && <span className="status-code">{apiStatusCode}</span>}
-            <button className="reset-icon-button" onClick={handleStartOver} title="Back to main menu" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+            <button className="reset-icon-button icon-button-red" onClick={handleStartOver} title="Back to main menu">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
               </svg>
@@ -7071,7 +7243,7 @@ export default function Home() {
               </select>
             )}
             {demoLinkCompleted && (
-              <button className="reset-icon-button" onClick={handleStartOver} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+              <button className="reset-icon-button icon-button-red" onClick={handleStartOver} title="Reset Session">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
                 </svg>
@@ -7160,69 +7332,58 @@ export default function Home() {
           />
         </div>
       )}
-      <LinkButton 
-        onClick={handleButtonClick} 
-        isVisible={showButton && !showWelcome && !showProductModal && !showChildModal && !showEventLogs} 
-      />
       <Modal isVisible={showProductModal}>
-        <ProductSelector 
-          products={demoLinkCompleted 
-            ? PRODUCTS_ARRAY.filter((p) => p.id !== 'link' && !p.id.startsWith('link-') && demoProductsVisibility[p.id])
-            : PRODUCTS_ARRAY} 
-          onSelect={handleProductSelect}
-          isDisabled={getProductDisableInfo}
-          onSettingsClick={demoLinkCompleted ? undefined : handleOpenSettings}
-          hasCustomSettings={hasCustomSettings}
-          onResetClick={demoLinkCompleted ? handleStartOver : undefined}
-        />
-      </Modal>
-      <Modal isVisible={showChildModal}>
-        {selectedProduct && PRODUCT_CONFIGS[selectedProduct]?.children && (
-          <ProductSelector 
-            products={demoLinkCompleted 
-              ? PRODUCT_CONFIGS[selectedProduct].children!.filter((c) => c.id !== 'link' && !c.id.startsWith('link-') && demoProductsVisibility[c.id])
-              : PRODUCT_CONFIGS[selectedProduct].children!} 
-            onSelect={handleChildProductSelect}
-            isDisabled={getProductDisableInfo}
-            onBack={() => {
-              setShowChildModal(false);
-              setShowProductModal(true);
-            }}
-            showBackButton={true}
-            onSettingsClick={demoLinkCompleted ? undefined : handleOpenSettings}
+        {demoLinkCompleted ? (
+          <ProductWizard
+            cards={wizardPickerCards}
+            mode="pick"
+            title="Call those APIs"
+            subtitle=""
+            onPillClick={handleRunLeafProduct}
+            onResetClick={handleStartOver}
+          />
+        ) : (
+          <ProductWizard
+            cards={wizardCards}
+            mode="select"
+            title="What do you want to test?"
+            subtitle=""
+            onPillClick={handleToggleWizardLeaf}
+            onContinue={handleWizardStart}
+            continueDisabled={!hasAnyEnabledLeaf}
+            continueLabel="Start"
+            onSettingsClick={handleOpenSettings}
             hasCustomSettings={hasCustomSettings}
-            title={PRODUCT_CONFIGS[selectedProduct].name}
-            onResetClick={demoLinkCompleted ? handleStartOver : undefined}
           />
         )}
       </Modal>
-      <Modal isVisible={showGrandchildModal}>
-        {selectedProduct && selectedChildProduct && (() => {
-          const parentConfig = PRODUCT_CONFIGS[selectedProduct];
-          const childConfig = parentConfig?.children?.find(c => c.id === selectedChildProduct);
-          return childConfig?.children && (
-            <ProductSelector 
-              products={demoLinkCompleted 
-                ? childConfig.children.filter((gc) => gc.id !== 'link' && !gc.id.startsWith('link-') && demoProductsVisibility[gc.id])
-                : childConfig.children} 
-              onSelect={handleGrandchildProductSelect}
-              isDisabled={getProductDisableInfo}
-              onBack={() => {
-                setShowGrandchildModal(false);
-                setSelectedGrandchildProduct(null);
-                setShowChildModal(true);
-              }}
-              showBackButton={true}
-              onSettingsClick={demoLinkCompleted ? undefined : handleOpenSettings}
-              hasCustomSettings={hasCustomSettings}
-              title={childConfig.name}
-              onResetClick={demoLinkCompleted ? handleStartOver : undefined}
-            />
-          );
-        })()}
-      </Modal>
       <Modal isVisible={showSettingsModal}>
         <div className="settings-modal">
+          <button
+            type="button"
+            className="settings-gear-button settings-theme-toggle-button"
+            onClick={handleToggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          >
+            {theme === 'dark' ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2" />
+                <path d="M12 20v2" />
+                <path d="m4.93 4.93 1.41 1.41" />
+                <path d="m17.66 17.66 1.41 1.41" />
+                <path d="M2 12h2" />
+                <path d="M20 12h2" />
+                <path d="m6.34 17.66-1.41 1.41" />
+                <path d="m19.07 4.93-1.41 1.41" />
+              </svg>
+            ) : (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
           <a
             className="settings-gear-button settings-docs-button"
             href="https://github.com/only-devices/plaid-flash-v2/tree/main?tab=readme-ov-file#plaid-flash"
@@ -7231,169 +7392,194 @@ export default function Home() {
             aria-label="Open README documentation"
             title="Docs"
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
               <path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 2-3 4" />
               <path d="M12 17h.01" />
             </svg>
           </a>
-          <div className="settings-scroll-area">
-            <div className="settings-header">
-              <h2>Settings</h2>
-            </div>
-            <div className="settings-tabs" role="tablist" aria-label="Settings tabs">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={settingsTab === 'flash'}
-                className={`settings-tab ${settingsTab === 'flash' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('flash')}
-              >
-                Flash
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={settingsTab === 'link'}
-                className={`settings-tab ${settingsTab === 'link' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('link')}
-              >
-                Link
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={settingsTab === 'advanced'}
-                className={`settings-tab ${settingsTab === 'advanced' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('advanced')}
-              >
-                Advanced
-              </button>
-            </div>
-            <div className="settings-grid">
-              {settingsTab === 'flash' && (
-                <>
-                  <SettingsToggle
-                    label="Demo Mode"
-                    checked={tempDemoMode}
-                    onChange={handleToggleDemo}
-                    disabled={tempZapMode}
-                  />
-                  <SettingsToggle
-                    label="⚡️ Mode"
-                    checked={tempZapMode}
-                    onChange={handleToggleZap}
-                    disabled={tempDemoMode}
-                  />
-                  <SettingsToggle
-                    label="Layer"
-                    checked={tempLayerMode}
-                    onChange={handleToggleLayer}
-                  disabled={!effectiveWebhookConfigUrlForSettings || tempEmbeddedMode || tempHostedLinkEnabled || tempMultiItemLinkEnabled || tempBypassLink}
-                  tooltip={
-                    !effectiveWebhookConfigUrlForSettings
-                      ? 'Set your webhook URL below to enable Layer'
-                      : tempEmbeddedMode
-                        ? 'Disable Embedded Link to use Layer'
-                        : tempHostedLinkEnabled
-                          ? 'Disable Hosted Link to use Layer'
-                          : tempMultiItemLinkEnabled
-                            ? 'Disable Multi-item Link to use Layer'
-                            : tempBypassLink
-                              ? 'Disable Bypass Link to use Layer'
+          <div className="settings-header">
+            <h2>Settings</h2>
+          </div>
+          <div className="settings-cards-area">
+            <div className="wizard-grid settings-card-grid">
+              <section className="wizard-card wizard-card--auto" aria-label="Flash">
+                <header className="wizard-card-header">
+                  <h3 className="wizard-card-title">Flash</h3>
+                </header>
+                <div className="wizard-card-body">
+                  <div className="wizard-pills">
+                    <SettingsPill
+                      label="⚡️ Mode"
+                      checked={tempZapMode}
+                      onChange={handleToggleZap}
+                    />
+                    <SettingsPill
+                      label="Layer"
+                      checked={tempLayerMode}
+                      onChange={handleToggleLayer}
+                      disabled={
+                        !effectiveWebhookConfigUrlForSettings ||
+                        tempEmbeddedMode ||
+                        tempHostedLinkEnabled ||
+                        tempMultiItemLinkEnabled ||
+                        tempBypassLink ||
+                        tempUpdateModeEnabled
+                      }
+                      tooltip={
+                        !effectiveWebhookConfigUrlForSettings
+                          ? 'Set your webhook URL below to enable Layer'
+                          : tempEmbeddedMode
+                            ? 'Disable Embedded Link to use Layer'
+                            : tempHostedLinkEnabled
+                              ? 'Disable Hosted Link to use Layer'
+                              : tempMultiItemLinkEnabled
+                                ? 'Disable Multi-item Link to use Layer'
+                                : tempBypassLink
+                                  ? 'Disable Bypass Link to use Layer'
+                                  : tempUpdateModeEnabled
+                                    ? 'Disable Update Mode to use Layer'
+                                    : undefined
+                      }
+                    />
+                    <SettingsPill
+                      label="Layer Identity Match"
+                      checked={tempLayerIdentityMatchEnabled}
+                      onChange={handleToggleLayerIdentityMatch}
+                      disabled={!tempLayerMode}
+                      tooltip={!tempLayerMode ? 'Enable Layer to use this' : undefined}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="wizard-card wizard-card--auto" aria-label="Link">
+                <header className="wizard-card-header">
+                  <h3 className="wizard-card-title">Link</h3>
+                </header>
+                <div className="wizard-card-body">
+                  <div className="wizard-pills">
+                    <SettingsPill
+                      label="Embedded Link"
+                      checked={tempEmbeddedMode}
+                      onChange={handleToggleEmbedded}
+                      disabled={tempLayerMode || tempUpdateModeEnabled}
+                      tooltip={
+                        tempLayerMode
+                          ? 'Disable Layer to use Embedded Link'
+                          : tempUpdateModeEnabled
+                            ? 'Disable Update Mode to use Embedded Link'
+                            : undefined
+                      }
+                    />
+                    <SettingsPill
+                      label="Hosted Link"
+                      checked={tempHostedLinkEnabled}
+                      onChange={handleToggleHostedLink}
+                      disabled={tempLayerMode || tempUpdateModeEnabled || !effectiveWebhookConfigUrlForSettings}
+                      tooltip={
+                        tempLayerMode
+                          ? 'Disable Layer to use Hosted Link'
+                          : tempUpdateModeEnabled
+                            ? 'Disable Update Mode to use Hosted Link'
+                            : !effectiveWebhookConfigUrlForSettings
+                              ? 'Set your webhook URL below to enable Hosted Link'
                               : undefined
-                  }
-                />
-                <SettingsToggle
-                  label="Layer Identity Match"
-                  checked={tempLayerIdentityMatchEnabled}
-                  onChange={handleToggleLayerIdentityMatch}
-                  disabled={!tempLayerMode}
-                  tooltip={!tempLayerMode ? 'Enable Layer to use this' : undefined}
-                  />
-                </>
-              )}
+                      }
+                    />
+                    <SettingsPill
+                      label="Multi-item Link"
+                      checked={tempMultiItemLinkEnabled}
+                      onChange={handleToggleMultiItemLink}
+                      disabled={tempLayerMode || tempBypassLink || tempUpdateModeEnabled}
+                      tooltip={
+                        tempLayerMode
+                          ? 'Disable Layer to use Multi-item Link'
+                          : tempBypassLink
+                            ? 'Disable Bypass Link to use Multi-item Link'
+                            : tempUpdateModeEnabled
+                              ? 'Disable Update Mode to use Multi-item Link'
+                              : undefined
+                      }
+                    />
+                    <SettingsPill
+                      label="Bypass Link"
+                      checked={tempBypassLink}
+                      onChange={handleToggleBypassLink}
+                      disabled={tempLayerMode || tempUpdateModeEnabled}
+                      tooltip={
+                        tempLayerMode
+                          ? 'Disable Layer to use Bypass Link'
+                          : tempUpdateModeEnabled
+                            ? 'Disable Update Mode to use Bypass Link'
+                            : undefined
+                      }
+                    />
+                    <SettingsPill
+                      label="Update Mode"
+                      checked={tempUpdateModeEnabled}
+                      onChange={handleToggleUpdateMode}
+                      disabled={
+                        tempLayerMode ||
+                        tempEmbeddedMode ||
+                        tempHostedLinkEnabled ||
+                        tempMultiItemLinkEnabled ||
+                        tempBypassLink
+                      }
+                      tooltip={
+                        tempLayerMode
+                          ? 'Disable Layer to use Update Mode'
+                          : tempEmbeddedMode
+                            ? 'Disable Embedded Link to use Update Mode'
+                            : tempHostedLinkEnabled
+                              ? 'Disable Hosted Link to use Update Mode'
+                              : tempMultiItemLinkEnabled
+                                ? 'Disable Multi-item Link to use Update Mode'
+                                : tempBypassLink
+                                  ? 'Disable Bypass Link to use Update Mode'
+                                  : undefined
+                      }
+                    />
+                    <SettingsPill
+                      label="Include phone_number"
+                      checked={tempIncludePhoneNumber}
+                      onChange={handleToggleIncludePhoneNumber}
+                    />
+                    <SettingsPill
+                      label="Always call /user/create first"
+                      checked={tempAlwaysUserCreate}
+                      onChange={handleToggleAlwaysUserCreate}
+                    />
+                  </div>
+                </div>
+              </section>
 
-              {settingsTab === 'link' && (
-                <>
-                  <SettingsToggle
-                    label="Embedded Link"
-                    checked={tempEmbeddedMode}
-                    onChange={handleToggleEmbedded}
-                  disabled={tempLayerMode}
-                  tooltip={tempLayerMode ? 'Disable Layer to use Embedded Link' : undefined}
-                  />
-                  <SettingsToggle
-                    label="Hosted Link"
-                    checked={tempHostedLinkEnabled}
-                    onChange={handleToggleHostedLink}
-                  disabled={tempLayerMode || !effectiveWebhookConfigUrlForSettings}
-                  tooltip={
-                    tempLayerMode
-                      ? 'Disable Layer to use Hosted Link'
-                      : !effectiveWebhookConfigUrlForSettings
-                        ? 'Set your webhook URL below to enable Hosted Link'
-                        : undefined
-                  }
-                  />
-                  <SettingsToggle
-                    label="Multi-item Link"
-                    checked={tempMultiItemLinkEnabled}
-                    onChange={handleToggleMultiItemLink}
-                  disabled={tempLayerMode || tempBypassLink}
-                    tooltip={
-                    tempLayerMode
-                      ? 'Disable Layer to use Multi-item Link'
-                      : tempBypassLink
-                        ? 'Disable Bypass Link to use Multi-item Link'
-                        : undefined
-                    }
-                  />
-                  <SettingsToggle
-                    label="Bypass Link"
-                    checked={tempBypassLink}
-                    onChange={handleToggleBypassLink}
-                  disabled={tempLayerMode}
-                  tooltip={tempLayerMode ? 'Disable Layer to use Bypass Link' : undefined}
-                  />
-                  <SettingsToggle
-                    label="Include phone_number in Link Token Create config"
-                    checked={tempIncludePhoneNumber}
-                    onChange={handleToggleIncludePhoneNumber}
-                    disabled={false}
-                  />
-                  <SettingsToggle
-                    label="Always call /user/create first"
-                    checked={tempAlwaysUserCreate}
-                    onChange={handleToggleAlwaysUserCreate}
-                    disabled={false}
-                  />
-                </>
-              )}
-
-              {settingsTab === 'advanced' && (
-                <>
-                  <SettingsToggle
-                    label="Use ALT_PLAID_CLIENT_ID"
-                    checked={tempUseAltCredentials}
-                    onChange={handleToggleAltCredentials}
-                    disabled={!altCredentialsAvailable || tempLayerMode}
-                    tooltip={tempLayerMode ? 'Layer requires the ALT Client ID' : undefined}
-                  />
-                  <SettingsToggle
-                    label="Use legacy user_token"
-                    checked={tempUseLegacyUserToken}
-                    onChange={handleToggleLegacyUserToken}
-                    disabled={false}
-                  />
-                  <SettingsToggle
-                    label="Remove items and users automatically"
-                    checked={tempAutoRemoveEnabled}
-                    onChange={handleToggleAutoRemove}
-                    disabled={false}
-                  />
-                </>
-              )}
+              <section className="wizard-card wizard-card--auto" aria-label="Advanced">
+                <header className="wizard-card-header">
+                  <h3 className="wizard-card-title">Advanced</h3>
+                </header>
+                <div className="wizard-card-body">
+                  <div className="wizard-pills">
+                    <SettingsPill
+                      label="Use ALT_PLAID_CLIENT_ID"
+                      checked={tempUseAltCredentials}
+                      onChange={handleToggleAltCredentials}
+                      disabled={!altCredentialsAvailable || tempLayerMode}
+                      tooltip={tempLayerMode ? 'Layer requires the ALT Client ID' : undefined}
+                    />
+                    <SettingsPill
+                      label="Use legacy user_token"
+                      checked={tempUseLegacyUserToken}
+                      onChange={handleToggleLegacyUserToken}
+                    />
+                    <SettingsPill
+                      label="Auto-remove items & users"
+                      checked={tempAutoRemoveEnabled}
+                      onChange={handleToggleAutoRemove}
+                    />
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -7421,55 +7607,6 @@ export default function Home() {
         </div>
       </Modal>
       
-      {/* Demo Mode Product Selection Modal */}
-      <Modal isVisible={showDemoProductsModal}>
-        <div className="demo-products-modal">
-          <div className="settings-header">
-            <h2>Select Products to Demo</h2>
-          </div>
-          <div className="demo-products-grid">
-            {PRODUCTS_ARRAY.filter((p) => p.id !== 'link' && !p.id.startsWith('link-')).map(product => (
-              <div key={product.id} className="product-group-container">
-                <div className="product-group">
-                  <SettingsToggle
-                    label={product.name}
-                    checked={demoProductsVisibility[product.id] || false}
-                    onChange={() => handleToggleDemoProduct(product.id)}
-                    disabled={false}
-                  />
-                  {product.children && (
-                    <div className="product-children-nested">
-                      {product.children
-                        .filter((c) => c.id !== 'link' && !c.id.startsWith('link-'))
-                        .map(child => (
-                        <SettingsToggle
-                          key={child.id}
-                          label={child.shortName || child.name}
-                          checked={demoProductsVisibility[child.id] || false}
-                          onChange={() => handleToggleDemoProduct(child.id)}
-                          disabled={false}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="button-row">
-            <button className="action-button button-red" onClick={handleCancelDemoProducts}>
-              Cancel
-            </button>
-            <button
-              className="action-button button-blue"
-              onClick={handleDemoProductsGo}
-              disabled={!Object.values(demoProductsVisibility).some(v => v)}
-            >
-              Go
-            </button>
-          </div>
-        </div>
-      </Modal>
       
       <Modal isVisible={showModal && !(showEventLogs && (modalState === 'callback-success' || modalState === 'callback-exit'))}>
         {renderModalContent()}
@@ -7604,7 +7741,7 @@ export default function Home() {
                 <div className="success-header">
                 <div className="success-icon">✓</div>
                   <h2>/accounts/get Response</h2>
-                  <button className="reset-icon-button" onClick={handleZapReset} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+                  <button className="reset-icon-button icon-button-red" onClick={handleZapReset} title="Reset Session">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
                     </svg>
@@ -7643,7 +7780,7 @@ export default function Home() {
                         return productConfig?.apiTitle || productConfig?.name || 'Product API';
                       })()} Response
                 </h2>
-                <button className="reset-icon-button" onClick={handleZapReset} title="Reset Session" style={{ background: 'linear-gradient(135deg, #c7659f 0%, #c43d52 100%)' }}>
+                <button className="reset-icon-button icon-button-red" onClick={handleZapReset} title="Reset Session">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
                   </svg>
