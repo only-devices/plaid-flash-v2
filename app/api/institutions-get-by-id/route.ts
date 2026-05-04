@@ -5,10 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { institution_id, country_codes } = await request.json();
 
-    if (!institution_id) {
-      return NextResponse.json({ error: 'institution_id is required' }, { status: 400 });
-    }
-
     const plaid = createPlaidClient(request);
 
     const response = await plaid.institutionsGetById({

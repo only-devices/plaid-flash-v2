@@ -5,13 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { access_token, start_date, end_date } = await request.json();
 
-    if (!access_token) {
-      return NextResponse.json(
-        { error: 'access_token is required' },
-        { status: 400 }
-      );
-    }
-
     const plaid = createPlaidClient(request);
 
     // Convert string dates to Date objects for plaid-fetch

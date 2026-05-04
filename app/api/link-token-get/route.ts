@@ -5,17 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { link_token } = await request.json();
 
-    if (!link_token || typeof link_token !== 'string') {
-      return NextResponse.json(
-        {
-          error_code: 'INVALID_FIELD',
-          error_message: 'link_token is required',
-          error_type: 'INVALID_REQUEST',
-        },
-        { status: 400 }
-      );
-    }
-
     const { clientId, secret } = getPlaidKeys(request);
 
     const response = await fetch(
@@ -41,10 +30,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error fetching link token details:', error);
     return NextResponse.json(
-      {
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to get link token details',
-      },
+      { error_message: error.message || 'Failed to get link token details' },
       { status: 500 }
     );
   }

@@ -151,33 +151,6 @@ describe('POST /api/create-link-token', () => {
     expect(body.access_token).toBe('access-sandbox-123');
   });
 
-  it('returns 400 when user_id provided without user object', async () => {
-    const req = createRequest({
-      products: ['cra_base_report'],
-      user_id: 'user_abc123',
-      // no user object
-    });
-    const res = await POST(req);
-    const data = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(data.error_code).toBe('INVALID_FIELD');
-    expect(data.error_message).toContain('user.client_user_id is required');
-  });
-
-  it('returns 400 when user is not an object', async () => {
-    const req = createRequest({
-      products: ['auth'],
-      user: 'not-an-object',
-    });
-    const res = await POST(req);
-    const data = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(data.error_code).toBe('INVALID_FIELD');
-    expect(data.error_message).toContain('user must be an object');
-  });
-
   it('returns Plaid error on API failure', async () => {
     mockPlaidError(400, {
       error_type: 'INVALID_REQUEST',
@@ -201,7 +174,9 @@ describe('POST /api/create-link-token', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error_code).toBe('INTERNAL_SERVER_ERROR');
+    expect(data.error_message).toBe('Network error');
+    // The internal 500 handler should not synthesize a Plaid-style error_code.
+    expect(data.error_code).toBeUndefined();
   });
 
   it('passes additional params through to Plaid', async () => {

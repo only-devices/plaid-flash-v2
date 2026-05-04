@@ -12,16 +12,8 @@ export async function POST(request: NextRequest) {
       secret: secret,
     };
     
-    if (user_id) {
-      requestBody.user_id = user_id;
-    } else if (user_token) {
-      requestBody.user_token = user_token;
-    } else {
-      return NextResponse.json(
-        { error: 'Either user_id or user_token is required' },
-        { status: 400 }
-      );
-    }
+    if (user_id) requestBody.user_id = user_id;
+    if (user_token) requestBody.user_token = user_token;
 
     // Make direct fetch call to bypass plaid-fetch's field stripping
     // (plaid-fetch v1.0.2 doesn't support user_id in BaseReportGetRequest)

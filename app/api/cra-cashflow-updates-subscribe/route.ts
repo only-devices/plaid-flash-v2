@@ -5,30 +5,17 @@ export async function POST(request: NextRequest) {
   try {
     const { user_id, user_token, item_id, webhook } = await request.json();
 
-    if (!item_id) {
-      return NextResponse.json({ error: 'item_id is required' }, { status: 400 });
-    }
-
-    if (!webhook) {
-      return NextResponse.json({ error: 'webhook is required' }, { status: 400 });
-    }
-
     const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody: any = {
       client_id: clientId,
       secret: secret,
-      item_id,
-      webhook,
     };
 
-    if (user_id) {
-      requestBody.user_id = user_id;
-    } else if (user_token) {
-      requestBody.user_token = user_token;
-    } else {
-      return NextResponse.json({ error: 'Either user_id or user_token is required' }, { status: 400 });
-    }
+    if (item_id) requestBody.item_id = item_id;
+    if (webhook) requestBody.webhook = webhook;
+    if (user_id) requestBody.user_id = user_id;
+    if (user_token) requestBody.user_token = user_token;
 
     const response = await fetch(`https://${process.env.PLAID_ENV || 'sandbox'}.plaid.com/cra/monitoring_insights/subscribe`, {
       method: 'POST',

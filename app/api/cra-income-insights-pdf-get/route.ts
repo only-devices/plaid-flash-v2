@@ -13,16 +13,8 @@ export async function POST(request: NextRequest) {
       add_ons: ['cra_income_insights'],
     };
 
-    if (user_id) {
-      requestBody.user_id = user_id;
-    } else if (user_token) {
-      requestBody.user_token = user_token;
-    } else {
-      return NextResponse.json(
-        { error: 'Either user_id or user_token is required' },
-        { status: 400 }
-      );
-    }
+    if (user_id) requestBody.user_id = user_id;
+    if (user_token) requestBody.user_token = user_token;
 
     const response = await fetch(
       `https://${process.env.PLAID_ENV || 'sandbox'}.plaid.com/cra/check_report/pdf/get`,

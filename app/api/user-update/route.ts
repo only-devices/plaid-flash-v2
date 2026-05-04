@@ -6,20 +6,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { user_id, identity } = body || {};
 
-    if (!user_id || typeof user_id !== 'string') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'user_id is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!identity || typeof identity !== 'object') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'identity is required' },
-        { status: 400 }
-      );
-    }
-
     const { clientId, secret } = getPlaidKeys(request);
 
     const requestBody = {
@@ -45,11 +31,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error calling user/update:', error);
     return NextResponse.json(
-      {
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to update user',
-        display_message: 'Unable to update user identity. Please try again.',
-      },
+      { error_message: error.message || 'Failed to update user' },
       { status: 500 }
     );
   }

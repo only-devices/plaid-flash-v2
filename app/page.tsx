@@ -179,6 +179,7 @@ export default function Home() {
   const [demoProductsVisibility, setDemoProductsVisibility] = useState<Record<string, boolean>>({});
   const [isDemoModeStarting, setIsDemoModeStarting] = useState(false);
   const [demoPendingLinkTokenConfig, setDemoPendingLinkTokenConfig] = useState<any>(null);
+  const [demoPendingSandboxConfig, setDemoPendingSandboxConfig] = useState<any>(null);
 
   // CRA Mode state
   const [userCreateConfig, setUserCreateConfig] = useState<any>(null);
@@ -276,9 +277,6 @@ export default function Home() {
   const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
   const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
   const hostedLinkPopupRef = useRef<Window | null>(null);
-  const [hostedWaitingMode, setHostedWaitingMode] = useState<'hosted_link' | 'cra_check_report'>('hosted_link');
-  const [craCheckReportExpectedUserId, setCraCheckReportExpectedUserId] = useState<string | null>(null);
-  const [craCheckReportManualReady, setCraCheckReportManualReady] = useState(false);
 
   // Layer state
   const [layerSessionActive, setLayerSessionActive] = useState(false);
@@ -670,9 +668,6 @@ export default function Home() {
           setHostedLinkManualPayload('');
           setHostedLinkManualParseError(null);
           setHostedLinkExtractedPublicTokens([]);
-          setHostedWaitingMode('hosted_link');
-          setCraCheckReportExpectedUserId(null);
-          setCraCheckReportManualReady(false);
           setShowEventLogs(false);
     
           setModalState('hosted-waiting');
@@ -1328,6 +1323,39 @@ export default function Home() {
         return;
       }
 
+      // Demo Mode + Bypass Link bootstrap: after /user/create, attach the
+      // user_id/user_token to the pending sandbox config and proceed with
+      // /sandbox/public_token/create instead of /link/token/create.
+      if (demoMode && isDemoModeStarting && demoPendingSandboxConfig) {
+        const pendingSandbox: any = { ...demoPendingSandboxConfig };
+
+        const userCreateClientUserId = String(configToUse?.client_user_id || '').trim();
+        if (userCreateClientUserId) {
+          setClientUserId(userCreateClientUserId);
+        }
+
+        if (useLegacyUserToken && newUserToken) {
+          pendingSandbox.user_token = newUserToken;
+          setUsedUserToken(true);
+        } else if (newUserId) {
+          pendingSandbox.user_id = newUserId;
+          setUsedUserToken(false);
+        } else if (newUserToken) {
+          pendingSandbox.user_token = newUserToken;
+          setUsedUserToken(true);
+        }
+
+        setDemoPendingSandboxConfig(null);
+        setSandboxConfig(pendingSandbox);
+        if (zapMode) {
+          handleProceedWithBypassLink(pendingSandbox);
+        } else {
+          setModalState('preview-sandbox-config');
+          setShowModal(true);
+        }
+        return;
+      }
+
       // Demo Mode bootstrap: after /user/create, resume pending /link/token/create preview
       if (demoMode && isDemoModeStarting && demoPendingLinkTokenConfig) {
         const pendingCfg: any = { ...demoPendingLinkTokenConfig };
@@ -1605,17 +1633,6 @@ export default function Home() {
       const v = typeof (cfg as any).access_token === 'string' ? String((cfg as any).access_token).trim() : '';
       if (!v) return 'access_token is required. Please set it in the /link/token/create config.';
     }
-    const isUserBasedUpdate = (typeof cfg.user_id === 'string' && cfg.user_id.trim().length > 0) || (typeof cfg.user_token === 'string' && cfg.user_token.trim().length > 0);
-    if (!isUserBasedUpdate) return null;
-
-    const user = (cfg as any).user;
-    if (!user || typeof user !== 'object' || Array.isArray(user)) {
-      return 'Update Mode (user_id/user_token) requires a user object with user.client_user_id.';
-    }
-    const clientUserId = typeof (user as any).client_user_id === 'string' ? (user as any).client_user_id.trim() : '';
-    if (!clientUserId) {
-      return 'Update Mode (user_id/user_token) requires user.client_user_id. Please set it in the /link/token/create config.';
-    }
     return null;
   };
 
@@ -1705,18 +1722,12 @@ export default function Home() {
         return;
       }
 
-      // Step D: wait for CHECK_REPORT / USER_CHECK_REPORT_READY webhook (reuse hosted-waiting view)
-      setHostedWaitingMode('cra_check_report');
-      setCraCheckReportExpectedUserId(pending.userId);
-      setCraCheckReportManualReady(false);
-      setHostedLinkUrl(null);
-      setHostedLinkManualPayload('');
-      setHostedLinkManualParseError(null);
-      setHostedLinkExtractedPublicTokens([]);
-
+      // Step D: skip the manual webhook-paste gate; jump straight to the
+      // product API preview. The user is responsible for waiting until
+      // USER_CHECK_REPORT_READY arrives before clicking proceed; if Plaid
+      // returns an error because the report isn't ready, they can retry.
       setCraLayerPendingAfterUserUpdate(null);
-      setModalState('hosted-waiting');
-      setShowModal(true);
+      handleCraLayerReportReadyForward();
     } catch (error: any) {
       setErrorData({
         error: 'LAYER_CRA_USER_UPDATE_FAILED',
@@ -1883,9 +1894,6 @@ export default function Home() {
         setHostedLinkManualPayload('');
         setHostedLinkManualParseError(null);
         setHostedLinkExtractedPublicTokens([]);
-        setHostedWaitingMode('hosted_link');
-        setCraCheckReportExpectedUserId(null);
-        setCraCheckReportManualReady(false);
         setShowEventLogs(false);
   
         setModalState('hosted-waiting');
@@ -1921,9 +1929,6 @@ export default function Home() {
           setHostedLinkManualPayload('');
           setHostedLinkManualParseError(null);
           setHostedLinkExtractedPublicTokens([]);
-          setHostedWaitingMode('hosted_link');
-          setCraCheckReportExpectedUserId(null);
-          setCraCheckReportManualReady(false);
           setShowEventLogs(false);
     
           setModalState('hosted-waiting');
@@ -2855,7 +2860,16 @@ export default function Home() {
       // pre-selected. Exchange the sandbox public_token (or reuse the
       // user-provided access_token under Update Mode) and surface the
       // post-Link picker so the user can pick which product to run.
+      // CRA bypass already has user_id from /user/create; CRA endpoints
+      // don't need an access_token, so skip the exchange in that case.
       if (demoMode && !demoLinkCompleted) {
+        if (userId || userToken) {
+          setDemoLinkCompleted(true);
+          setShowModal(false);
+          setShowProductModal(true);
+          return;
+        }
+
         setModalState('processing-accounts');
         setShowModal(true);
         const exchangeResult = await exchangeOrReuseAccessToken(public_token);
@@ -3207,14 +3221,22 @@ export default function Home() {
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
 
-    // Demo Mode bootstrap: no single product is selected yet; always exchange public_token and return to the demo menu.
+    // Demo Mode bootstrap: no single product is selected yet. CRA-only Link
+    // flows don't return a public_token, so skip the exchange in that case
+    // and surface the post-Link picker; the picker routes CRA products
+    // through handleDemoModeApiCall, which jumps straight to the product
+    // API preview (no manual USER_CHECK_REPORT_READY paste step).
     if (demoMode && !demoLinkCompleted) {
-      try {
-        const public_token = typeof callbackData?.public_token === 'string' ? callbackData.public_token : '';
-        if (!public_token) {
-          throw new Error('Missing public_token for token exchange');
-        }
+      const public_token = typeof callbackData?.public_token === 'string' ? callbackData.public_token : '';
 
+      if (!public_token) {
+        setDemoLinkCompleted(true);
+        setShowModal(false);
+        setShowProductModal(true);
+        return;
+      }
+
+      try {
         setModalState('processing-accounts');
         setShowModal(true);
 
@@ -3260,18 +3282,11 @@ export default function Home() {
       return;
     }
 
-    // Link-only: Upgrade Mode behaves like CRA post-Link (wait for USER_CHECK_REPORT_READY, then call one CRA endpoint).
+    // Link-only: Upgrade Mode behaves like CRA post-Link. Skip the manual
+    // webhook-paste gate and route straight to the product API preview;
+    // Plaid returns an error if the report isn't ready, and the user can retry.
     if (effectiveProductId === 'link-upgrade-mode') {
-      const expectedUserId = userId || null;
-      setHostedWaitingMode('cra_check_report');
-      setCraCheckReportExpectedUserId(expectedUserId);
-      setCraCheckReportManualReady(false);
-      setHostedLinkUrl(null);
-      setHostedLinkManualPayload('');
-      setHostedLinkManualParseError(null);
-      setHostedLinkExtractedPublicTokens([]);
-      setModalState('hosted-waiting');
-      setShowModal(true);
+      handleUpgradeModeReportReadyForward();
       return;
     }
     
@@ -3874,18 +3889,13 @@ export default function Home() {
         throw new Error('Product API endpoint not configured');
       }
 
-      // CRA products are user-based and require waiting for USER_CHECK_REPORT_READY
+      // CRA products are user-based; skip the manual webhook-paste gate and
+      // jump straight to the product API preview. Plaid returns an error if
+      // USER_CHECK_REPORT_READY hasn't fired yet, and the user can retry.
       if (productConfig.isCRA) {
-        const expectedUserId = userId || null;
-        setHostedWaitingMode('cra_check_report');
-        setCraCheckReportExpectedUserId(expectedUserId);
-        setCraCheckReportManualReady(false);
-        setHostedLinkUrl(null);
-        setHostedLinkManualPayload('');
-        setHostedLinkManualParseError(null);
-        setHostedLinkExtractedPublicTokens([]);
-        setModalState('hosted-waiting');
-        setShowModal(true);
+        // Pass productId explicitly: handleRunLeafProduct just called
+        // setSelectionForLeaf and the React state hasn't propagated yet.
+        handleCraLayerReportReadyForward(productId);
         return;
       }
 
@@ -4511,10 +4521,11 @@ export default function Home() {
 
     // Bypass Link mode: skip /link/token/create entirely and create a sandbox
     // public_token directly so the rest of the demo flow (post-Link picker,
-    // per-product API calls) runs against the resulting access_token. CRA-only
-    // demo selections still go through /user/create + Link below — Bypass Link
-    // applies to non-CRA demo selections only.
-    if (bypassLink && !includesCra) {
+    // per-product API calls) runs against the resulting access_token. CRA
+    // selections must run /user/create first so we have a user_id to attach
+    // to the sandbox item; that path is handled below after the user-create
+    // step (see handleProceedWithUserCreate's demoPendingSandboxConfig branch).
+    if (bypassLink) {
       const sandboxInitialProducts = new Set<string>();
       const mergedSandboxParams: Record<string, any> = { options: {} };
       for (const leaf of selectedLeafConfigs) {
@@ -4546,8 +4557,20 @@ export default function Home() {
         sandboxFullConfig.options.webhook = effectiveWebhookConfigUrl;
       }
 
-      setSandboxConfig(sandboxFullConfig);
       setIsDemoModeStarting(true);
+
+      if (includesCra || alwaysUserCreate) {
+        // /user/create first so we can include user_id/user_token in the
+        // sandbox config. The sandbox preview modal opens from
+        // handleProceedWithUserCreate's demoPendingSandboxConfig branch.
+        setDemoPendingSandboxConfig(sandboxFullConfig);
+        const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
+        const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
+        showUserCreatePreview(productIdForUserCreate);
+        return;
+      }
+
+      setSandboxConfig(sandboxFullConfig);
       if (zapMode) {
         handleProceedWithBypassLink(sandboxFullConfig);
       } else {
@@ -4598,12 +4621,14 @@ export default function Home() {
       // /user/create first so we can include user_id/user_token in /link/token/create
       const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
       const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
+      setDemoPendingSandboxConfig(null);
       setDemoPendingLinkTokenConfig(demoConfig);
       showUserCreatePreview(productIdForUserCreate);
       return;
     }
 
     // Non-CRA demo: show /link/token/create preview directly
+    setDemoPendingSandboxConfig(null);
     setDemoPendingLinkTokenConfig(null);
     setLinkTokenConfig(demoConfig);
     setModalState('preview-config');
@@ -4622,9 +4647,6 @@ export default function Home() {
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setHostedLinkExtractedPublicTokens([]);
-    setHostedWaitingMode('hosted_link');
-    setCraCheckReportExpectedUserId(null);
-    setCraCheckReportManualReady(false);
 
     // Reset Cashflow Updates state
     setCashflowUpdatesItems([]);
@@ -5486,8 +5508,10 @@ export default function Home() {
     }
   };
 
-  const handleCraLayerReportReadyForward = useCallback(() => {
-    const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+  const handleCraLayerReportReadyForward = useCallback((productIdOverride?: string) => {
+    // Callers that just set selectedProduct (e.g. handleRunLeafProduct) can
+    // pass the productId directly to avoid racing React's state update.
+    const effectiveProductId = productIdOverride || selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     if (!productConfig?.isCRA || !productConfig.apiEndpoint) return;
     if (!userId) {
@@ -5503,9 +5527,6 @@ export default function Home() {
 
     const requestBody = buildProductRequestBody({ user_id: userId }, productConfig);
     setProductApiConfig(requestBody);
-    setHostedWaitingMode('hosted_link');
-    setCraCheckReportExpectedUserId(null);
-    setCraCheckReportManualReady(false);
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setModalState('preview-product-api');
@@ -5581,9 +5602,6 @@ export default function Home() {
     setUpgradeModeSelectedProductIndex(0);
     setProductApiTargetProductId(first.id);
     setProductApiConfig(requestBody);
-    setHostedWaitingMode('hosted_link');
-    setCraCheckReportExpectedUserId(null);
-    setCraCheckReportManualReady(false);
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setModalState('preview-product-api');
@@ -6054,7 +6072,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '200px',
                     maxHeight: '320px',
@@ -6115,7 +6133,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '200px',
                     maxHeight: '320px',
@@ -6238,7 +6256,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '400px',
                     maxHeight: '500px',
@@ -6310,7 +6328,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '400px',
                     maxHeight: '500px',
@@ -6381,7 +6399,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '400px',
                     maxHeight: '500px',
@@ -6447,7 +6465,7 @@ export default function Home() {
                   style={{
                     fontSize: 13,
                     fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: 'var(--surface-code)',
                     borderRadius: '12px',
                     minHeight: '400px',
                     maxHeight: '500px',
@@ -6725,17 +6743,15 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
       const isUpdateMode = effectiveProductId === 'link-update-mode';
-      const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
-      const isCraReportWaiting = hostedWaitingMode === 'cra_check_report';
-      const allowForwardWithoutTokens = !isCraReportWaiting && (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
+      const allowForwardWithoutTokens = (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
 
       return (
         <div className="modal-success">
           <div className="success-header">
-            <h2>{isCraReportWaiting ? 'CRA Report' : 'Hosted Link'}</h2>
+            <h2>Hosted Link</h2>
           </div>
 
-          {!isCraReportWaiting && hostedLinkUrl && (
+          {hostedLinkUrl && (
             <div style={{ marginBottom: 12 }}>
               <button
                 className="action-button button-blue"
@@ -6752,182 +6768,118 @@ export default function Home() {
             </div>
           )}
 
-          <>
-              <div className="account-data">
-                <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
-                  {isCraReportWaiting ? (
-                    <>
-                      Paste the full <code>USER_CHECK_REPORT_READY</code> webhook JSON payload below.
-                    </>
-                  ) : (
-                    <>
-                      Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
-                    </>
-                  )}
-                </p>
-                <textarea
-                  value={hostedLinkManualPayload}
-                  onChange={(e) => {
-                    const text = e.target.value;
-                    setHostedLinkManualPayload(text);
-                    if (!text.trim()) {
-                      setHostedLinkManualParseError(null);
-                      setHostedLinkExtractedPublicTokens([]);
-                      setCraCheckReportManualReady(false);
-                      return;
-                    }
-                    try {
-                      if (isCraReportWaiting) {
-                        const parsed = JSON.parse(text);
-                        const webhook_type = parsed?.webhook_type;
-                        const webhook_code = parsed?.webhook_code;
-                        const user_id = parsed?.user_id;
-                        if (webhook_type !== 'CHECK_REPORT') {
-                          throw new Error('Expected webhook_type CHECK_REPORT');
-                        }
-                        if (webhook_code !== 'USER_CHECK_REPORT_READY') {
-                          throw new Error('Expected webhook_code USER_CHECK_REPORT_READY');
-                        }
-                        if (craCheckReportExpectedUserId && user_id && user_id !== craCheckReportExpectedUserId) {
-                          throw new Error('Webhook user_id does not match current user');
-                        }
-                        setCraCheckReportManualReady(true);
-                        setHostedLinkManualParseError(null);
-                        setHostedLinkExtractedPublicTokens([]);
-                      } else {
-                        const tokens = parseHostedLinkSessionFinished(text);
-                        setHostedLinkExtractedPublicTokens(tokens);
-                        setHostedLinkManualParseError(null);
-                      }
-                    } catch (err: any) {
-                      setHostedLinkExtractedPublicTokens([]);
-                      setCraCheckReportManualReady(false);
-                      setHostedLinkManualParseError(err?.message || 'Invalid payload');
-                    }
-                  }}
-                  rows={10}
-                  style={{
-                    width: '100%',
-                    minHeight: 220,
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--input-border)',
-                    borderRadius: 12,
-                    color: 'var(--input-text)',
-                    padding: 12,
-                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                    fontSize: 12,
-                    resize: 'vertical',
-                  }}
-                  placeholder={
-                    isCraReportWaiting
-                      ? '{\n  "webhook_type": "CHECK_REPORT",\n  "webhook_code": "USER_CHECK_REPORT_READY",\n  "user_id": "usr_..."\n}'
-                      : '{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'
-                  }
-                />
-                {hostedLinkManualParseError && (
-                  <div className="config-error" style={{ marginTop: 10 }}>
-                    {hostedLinkManualParseError}
-                  </div>
-                )}
+          <div className="account-data">
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+              Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
+            </p>
+            <textarea
+              value={hostedLinkManualPayload}
+              onChange={(e) => {
+                const text = e.target.value;
+                setHostedLinkManualPayload(text);
+                if (!text.trim()) {
+                  setHostedLinkManualParseError(null);
+                  setHostedLinkExtractedPublicTokens([]);
+                  return;
+                }
+                try {
+                  const tokens = parseHostedLinkSessionFinished(text);
+                  setHostedLinkExtractedPublicTokens(tokens);
+                  setHostedLinkManualParseError(null);
+                } catch (err: any) {
+                  setHostedLinkExtractedPublicTokens([]);
+                  setHostedLinkManualParseError(err?.message || 'Invalid payload');
+                }
+              }}
+              rows={10}
+              style={{
+                width: '100%',
+                minHeight: 220,
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
+                borderRadius: 12,
+                color: 'var(--input-text)',
+                padding: 12,
+                fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                fontSize: 12,
+                resize: 'vertical',
+              }}
+              placeholder={'{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'}
+            />
+            {hostedLinkManualParseError && (
+              <div className="config-error" style={{ marginTop: 10 }}>
+                {hostedLinkManualParseError}
               </div>
-              <div className="modal-button-row three-buttons">
-                <button
-                  className="action-button button-red"
-                  onClick={() => {
-                    setHostedLinkManualPayload('');
-                    setHostedLinkManualParseError(null);
-                    setHostedLinkExtractedPublicTokens([]);
-                    setCraCheckReportManualReady(false);
-                  }}
-                >
-                  Clear
-                </button>
-                {isCraReportWaiting && (
-                  <button
-                    className="action-button button-gray"
-                    onClick={() => {
-                      if (isUpgradeMode) {
-                        handleUpgradeModeReportReadyForward();
-                      } else {
-                        handleCraLayerReportReadyForward();
-                      }
-                    }}
-                  >
-                    Skip
-                  </button>
-                )}
-                {!isCraReportWaiting && (
-                  <button
-                    className="action-button button-gray"
-                    onClick={async () => {
-                      const currentLinkToken = linkToken;
-                      if (!currentLinkToken) {
-                        setHostedLinkManualParseError('No link_token available');
-                        return;
-                      }
-                      setModalState('processing-accounts');
-                      try {
-                        const resp = await fetch('/api/link-token-get', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ link_token: currentLinkToken }),
-                        });
-                        const data = await resp.json();
-                        if (!resp.ok) {
-                          setErrorData(data);
-                          setApiStatusCode(resp.status);
-                          setModalState('api-error');
-                          return;
-                        }
-                        const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
-                        const tokens: string[] = itemAddResults
-                          .map((r: any) => r?.public_token)
-                          .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
-                        if (tokens.length === 0) {
-                          setHostedLinkManualParseError('No public_tokens found in /link/token/get response. Link session may not be finished yet.');
-                          setModalState('hosted-waiting');
-                          return;
-                        }
-                        await handleHostedLinkForward(tokens);
-                      } catch (error: any) {
-                        console.error('Hosted Link token/get error:', error);
-                        setErrorData({
-                          error: 'HOSTED_LINK_TOKEN_GET_ERROR',
-                          message: error.message || 'Failed to retrieve tokens from /link/token/get',
-                        });
-                        setApiStatusCode(500);
-                        setModalState('api-error');
-                      }
-                    }}
-                  >
-                    Fetch Tokens
-                  </button>
-                )}
-                <ArrowButton
-                  variant="blue"
-                  onClick={() => {
-                    if (isCraReportWaiting) {
-                      if (isUpgradeMode) {
-                        handleUpgradeModeReportReadyForward();
-                      } else {
-                        handleCraLayerReportReadyForward();
-                      }
-                      return;
-                    }
-                    if (isUpdateMode) {
-                      returnToProductMenuNoRemove();
-                      return;
-                    }
-                    handleHostedLinkForward(hostedLinkExtractedPublicTokens);
-                  }}
-                  disabled={
-                    isCraReportWaiting
-                      ? !craCheckReportManualReady
-                      : !allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0
+            )}
+          </div>
+          <div className="modal-button-row three-buttons">
+            <button
+              className="action-button button-red"
+              onClick={() => {
+                setHostedLinkManualPayload('');
+                setHostedLinkManualParseError(null);
+                setHostedLinkExtractedPublicTokens([]);
+              }}
+            >
+              Clear
+            </button>
+            <button
+              className="action-button button-gray"
+              onClick={async () => {
+                const currentLinkToken = linkToken;
+                if (!currentLinkToken) {
+                  setHostedLinkManualParseError('No link_token available');
+                  return;
+                }
+                setModalState('processing-accounts');
+                try {
+                  const resp = await fetch('/api/link-token-get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ link_token: currentLinkToken }),
+                  });
+                  const data = await resp.json();
+                  if (!resp.ok) {
+                    setErrorData(data);
+                    setApiStatusCode(resp.status);
+                    setModalState('api-error');
+                    return;
                   }
-                />
-              </div>
-          </>
+                  const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
+                  const tokens: string[] = itemAddResults
+                    .map((r: any) => r?.public_token)
+                    .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
+                  if (tokens.length === 0) {
+                    setHostedLinkManualParseError('No public_tokens found in /link/token/get response. Link session may not be finished yet.');
+                    setModalState('hosted-waiting');
+                    return;
+                  }
+                  await handleHostedLinkForward(tokens);
+                } catch (error: any) {
+                  console.error('Hosted Link token/get error:', error);
+                  setErrorData({
+                    error: 'HOSTED_LINK_TOKEN_GET_ERROR',
+                    message: error.message || 'Failed to retrieve tokens from /link/token/get',
+                  });
+                  setApiStatusCode(500);
+                  setModalState('api-error');
+                }
+              }}
+            >
+              Fetch Tokens
+            </button>
+            <ArrowButton
+              variant="blue"
+              onClick={() => {
+                if (isUpdateMode) {
+                  returnToProductMenuNoRemove();
+                  return;
+                }
+                handleHostedLinkForward(hostedLinkExtractedPublicTokens);
+              }}
+              disabled={!allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0}
+            />
+          </div>
         </div>
       );
     }
@@ -7191,7 +7143,7 @@ export default function Home() {
                     style={{
                       fontSize: 13,
                       fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                      backgroundColor: 'var(--surface-code)',
                       borderRadius: '12px',
                       minHeight: '400px',
                       maxHeight: '500px',

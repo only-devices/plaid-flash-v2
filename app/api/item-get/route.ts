@@ -5,10 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { access_token } = await request.json();
 
-    if (!access_token) {
-      return NextResponse.json({ error: 'access_token is required' }, { status: 400 });
-    }
-
     const plaid = createPlaidClient(request);
 
     const response = await plaid.itemGet({ access_token });

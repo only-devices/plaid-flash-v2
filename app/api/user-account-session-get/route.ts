@@ -6,13 +6,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { public_token } = body || {};
 
-    if (!public_token || typeof public_token !== 'string') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'public_token is required' },
-        { status: 400 }
-      );
-    }
-
     const { clientId, secret } = getPlaidKeys(request);
 
     const response = await fetch(`https://${process.env.PLAID_ENV || 'sandbox'}.plaid.com/user_account/session/get`, {
@@ -35,11 +28,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error calling user_account/session/get:', error);
     return NextResponse.json(
-      {
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to get user account session',
-        display_message: 'Unable to fetch Layer session data. Please try again.',
-      },
+      { error_message: error.message || 'Failed to get user account session' },
       { status: 500 }
     );
   }

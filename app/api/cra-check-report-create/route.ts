@@ -12,27 +12,6 @@ export async function POST(request: NextRequest) {
       products,
     } = body || {};
 
-    if (!user_id || typeof user_id !== 'string') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'user_id is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!webhook || typeof webhook !== 'string') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'webhook is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!consumer_report_permissible_purpose || typeof consumer_report_permissible_purpose !== 'string') {
-      return NextResponse.json(
-        { error_code: 'INVALID_REQUEST', error_message: 'consumer_report_permissible_purpose is required' },
-        { status: 400 }
-      );
-    }
-
     const normalizedDaysRequested =
       typeof days_requested === 'number' && Number.isFinite(days_requested) ? days_requested : 365;
 
@@ -70,11 +49,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error calling cra/check_report/create:', error);
     return NextResponse.json(
-      {
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to create CRA check report',
-        display_message: 'Unable to create CRA report. Please try again.',
-      },
+      { error_message: error.message || 'Failed to create CRA check report' },
       { status: 500 }
     );
   }

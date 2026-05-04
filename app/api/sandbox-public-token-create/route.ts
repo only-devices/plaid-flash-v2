@@ -58,11 +58,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error creating sandbox public token:', error);
     return NextResponse.json(
-      { 
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to create sandbox public token',
-        display_message: 'Unable to create sandbox public token. Please try again.'
-      },
+      { error_message: error.message || 'Failed to create sandbox public token' },
       { status: 500 }
     );
   }

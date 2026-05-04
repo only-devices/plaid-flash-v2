@@ -92,8 +92,10 @@ describe('POST /api/exchange-public-token', () => {
     const data = await res.json();
 
     expect(res.status).toBe(400);
-    expect(data.error_code).toBe('INTERNAL_SERVER_ERROR');
     expect(data.error_message).toBe('Bad request');
+    // Internal fallback (when Plaid's error body fails to parse) should
+    // not synthesize a Plaid-style error_code.
+    expect(data.error_code).toBeUndefined();
   });
 
   it('returns 500 for unexpected errors', async () => {

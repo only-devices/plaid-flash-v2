@@ -80,7 +80,7 @@ CRA products use a **user-based** flow:
 2. `/user/create` preview + create
 3. `/link/token/create` includes `user_id` or `user_token` (based on the **Use legacy user_token** toggle)
 4. Complete Link
-5. Pick a CRA product from the post-Link picker and run its API (paste webhook payloads when prompted)
+5. Pick a CRA product from the post-Link picker and run its API (wait for `USER_CHECK_REPORT_READY` to arrive, then click proceed)
 
 ### Hosted Link flow
 
@@ -98,7 +98,7 @@ When **Layer** is enabled, Plaid Flash uses **Layer + Link** (behind the scenes)
 - The app runs `/user/create`, then `/session/token/create` (using the selected product's `template_id`).
 - You'll be prompted to `submit({ phone_number })`. If `LAYER_NOT_AVAILABLE` occurs, you can `submit({ date_of_birth })` for Extended Autofill.
 - After Layer is ready, Link opens and returns `public_token` via `onSuccess` (then the app continues with the normal flow).
-- **Layer + CRA**: after Link completes, the app calls `/user_account/session/get`, then **previews `/user/update` (editable)** to persist identity, then calls `/cra/check_report/create` and waits for a `USER_CHECK_REPORT_READY` webhook before running the CRA `/get` endpoint.
+- **Layer + CRA**: after Link completes, the app calls `/user_account/session/get`, then **previews `/user/update` (editable)** to persist identity, then calls `/cra/check_report/create`. The product API preview opens immediately; you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed when ready (Plaid returns an error and you can retry if you click too early).
 
 ### Update Mode
 
@@ -185,7 +185,7 @@ Other Link-card settings:
 
 ## Webhooks
 
-Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. When the app needs a webhook payload (e.g. `USER_CHECK_REPORT_READY` or `SESSION_FINISHED`), it will prompt you to paste the JSON payload.
+Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. For Hosted Link, the app prompts you to paste the `SESSION_FINISHED` webhook payload before continuing; for CRA flows, you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed on the product API preview when it arrives.
 
 ## Testing
 

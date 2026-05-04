@@ -10,6 +10,10 @@
    [data-theme="light"] overrides the tokens that change for the light theme.
    Brand button gradients (blue/red/green/purple/violet) are kept identical
    in both themes to preserve product identity.
+   Code/config tokens (--surface-code, --text-code-default, --text-event-log,
+   --surface-row-even/odd, --shadow-code-inset, --json-*) are intentionally
+   defined only on :root so that any code block, JSON output, code editor,
+   and event log keeps its dark styling even when light mode is enabled.
    ========================================================================== */
 :root {
   /* App background */
@@ -23,7 +27,9 @@
   --surface-card: rgba(255, 255, 255, 0.03);
   --surface-card-hover: rgba(255, 255, 255, 0.05);
   --surface-input: rgba(0, 0, 0, 0.25);
-  --surface-code: rgba(15, 15, 25, 0.8);
+  /* Solid (fully opaque) so the code/editor surface renders as true dark
+     even when sitting on a white (light-mode) modal. */
+  --surface-code: #0f0f19;
   --surface-row-even: rgba(255, 255, 255, 0.03);
   --surface-row-odd: rgba(0, 0, 0, 0.25);
   --surface-overlay: rgba(0, 0, 0, 0.6);
@@ -141,13 +147,12 @@
   --surface-glass: #ffffff;
   --shadow-glass: 0 12px 40px rgba(15, 23, 42, 0.08);
 
-  /* Card / row surfaces */
+  /* Card / row surfaces
+     --surface-code, --surface-row-even, and --surface-row-odd are intentionally
+     not overridden here — code blocks and event log rows keep dark styling. */
   --surface-card: #ffffff;
   --surface-card-hover: #f6f8fa;
   --surface-input: #ffffff;
-  --surface-code: #f6f8fa;
-  --surface-row-even: #ffffff;
-  --surface-row-odd: #f6f8fa;
   --surface-overlay: rgba(15, 23, 42, 0.4);
   --surface-tab-strip: #f0f3f7;
   --surface-chart: #f6f8fa;
@@ -160,35 +165,25 @@
   --border-card-hover: #cdd5df;
   --border-divider: rgba(15, 23, 42, 0.06);
 
-  /* Text - softer dark grays (slate scale) for a less harsh read on light bg */
+  /* Text - softer dark grays (slate scale) for a less harsh read on light bg.
+     --text-code-default and --text-event-log are intentionally not overridden
+     so code blocks / event logs render with dark-mode text colors. */
   --text-primary: #334155;   /* was #1a1f36 — softened from near-black to slate-700 */
   --text-secondary: #475569; /* was #4a5567 — slate-600 */
   --text-muted: #64748b;     /* was #697386 — slate-500 */
   --text-faint: #94a3b8;     /* slate-400 */
   --text-faint-2: #cbd5e1;   /* slate-300 */
-  --text-code-default: #334155;
-  --text-event-log: #334155;
   --text-monospace: #475569;
   --reset-link-color: #64748b;
   --reset-link-hover: #334155;
 
-  /* JSON syntax (GitHub-light-ish) */
-  --json-key: #1f6feb;
-  --json-string: #0f7b3f;
-  --json-number: #953800;
-  --json-boolean: #5469d4;
-  --json-null: #6e7781;
-  --json-punct: #57606a;
-  --json-highlight-bg: rgb(255, 245, 173);
-  --json-highlight-key: #000000;
-  --json-highlight-punct: #0f0f0f;
-  --json-highlight-value: #5353a7;
+  /* JSON syntax tokens are intentionally not overridden for light mode —
+     JSON output always uses the dark-mode Nord-ish palette. */
 
-  /* Effects */
+  /* Effects (--shadow-code-inset is intentionally not overridden) */
   --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-elevated: 0 10px 25px rgba(15, 23, 42, 0.12);
   --shadow-button: 0 6px 16px rgba(15, 23, 42, 0.12);
-  --shadow-code-inset: inset 0 1px 2px rgba(15, 23, 42, 0.06);
   --focus-ring: rgba(84, 105, 212, 0.6);
 
   /* Stateful chips */
@@ -683,14 +678,12 @@ body {
   animation: fadeIn 0.7s ease-out 0.2s backwards;
 }
 
+/* Code editor stays dark in both themes; pin the caret to white so it
+   remains visible on the editor's dark surface regardless of the active
+   theme. */
 .code-editor-container textarea {
-  caret-color: var(--text-primary) !important;
+  caret-color: #ffffff !important;
   outline: none !important;
-}
-
-/* Add terminal-style blinking cursor */
-.code-editor-container textarea:focus {
-  caret-color: var(--text-primary) !important;
 }
 
 /* Config Error Message */
@@ -1800,13 +1793,17 @@ body {
   display: block;
 }
 
-/* Event logs use .event-logs-scroll instead of .account-data */
+/* Event logs use .event-logs-scroll instead of .account-data.
+   The container is given the dark code surface so event logs always
+   render with the dark "code" look, even when the surrounding modal
+   is white (light theme). */
 .event-logs-scroll {
   flex: 1;
   overflow-y: auto;
   margin-bottom: 0px;
   border-radius: 12px;
   max-height: 650px;
+  background: var(--surface-code);
 }
 
 /* Event logs scrollbar styling - matches account-data */

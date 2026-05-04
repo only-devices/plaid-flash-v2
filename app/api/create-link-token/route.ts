@@ -10,9 +10,6 @@ export async function POST(request: NextRequest) {
       (typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0) ||
       (typeof user_token === 'string' && user_token.trim().length > 0) ||
       (typeof user_id === 'string' && user_id.trim().length > 0);
-    const isUserBasedUpdateMode =
-      (typeof user_token === 'string' && user_token.trim().length > 0) ||
-      (typeof user_id === 'string' && user_id.trim().length > 0);
 
     // Default to auth if no products specified
     const productsArray = products ?? (isUpdateMode ? undefined : ['auth']);
@@ -21,27 +18,6 @@ export async function POST(request: NextRequest) {
     const { clientId, secret } = getPlaidKeys(request);
 
     const hasUserKey = Object.prototype.hasOwnProperty.call(body ?? {}, 'user');
-    if (isUserBasedUpdateMode && !hasUserKey) {
-      return NextResponse.json(
-        {
-          error_code: 'INVALID_FIELD',
-          error_message: 'user.client_user_id is required when user_id/user_token is provided for Update Mode',
-          error_type: 'INVALID_REQUEST',
-        },
-        { status: 400 }
-      );
-    }
-
-    if (hasUserKey && (user == null || typeof user !== 'object' || Array.isArray(user))) {
-      return NextResponse.json(
-        {
-          error_code: 'INVALID_FIELD',
-          error_message: 'user must be an object when provided',
-          error_type: 'INVALID_REQUEST',
-        },
-        { status: 400 }
-      );
-    }
 
     // Respect whether `user` was explicitly provided in the request body.
     // If absent, we add the minimum required user block for non-CRA flows.
@@ -61,19 +37,8 @@ export async function POST(request: NextRequest) {
     if (shouldIncludeUser) {
       // Plaid requires user.client_user_id whenever `user` is provided.
       // If the caller didn't provide `user`, we only add client_user_id (no extra defaults).
-      const baseUser: any = user || {};
+      const baseUser: any = (user && typeof user === 'object' && !Array.isArray(user)) ? user : {};
       const rawClientUserId = typeof baseUser?.client_user_id === 'string' ? baseUser.client_user_id.trim() : '';
-      if (isUserBasedUpdateMode && !rawClientUserId) {
-        return NextResponse.json(
-          {
-            error_code: 'INVALID_FIELD',
-            error_message: 'user.client_user_id is required when user object is provided',
-            error_type: 'INVALID_REQUEST',
-          },
-          { status: 400 }
-        );
-      }
-
       linkTokenConfig.user = { ...baseUser, client_user_id: rawClientUserId || generateClientUserId() };
     }
 
@@ -122,11 +87,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error creating link token:', error);
     return NextResponse.json(
-      { 
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to create link token',
-        display_message: 'Unable to create link token. Please try again.'
-      },
+      { error_message: error.message || 'Failed to create link token' },
       { status: 500 }
     );
   }

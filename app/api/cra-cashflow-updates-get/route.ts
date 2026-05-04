@@ -13,16 +13,8 @@ export async function POST(request: NextRequest) {
       consumer_report_permissible_purpose: consumer_report_permissible_purpose || 'ACCOUNT_REVIEW_CREDIT',
     };
     
-    if (user_id) {
-      requestBody.user_id = user_id;
-    } else if (user_token) {
-      requestBody.user_token = user_token;
-    } else {
-      return NextResponse.json(
-        { error: 'Either user_id or user_token is required' },
-        { status: 400 }
-      );
-    }
+    if (user_id) requestBody.user_id = user_id;
+    if (user_token) requestBody.user_token = user_token;
 
     // Make direct fetch call to bypass plaid-fetch's field stripping
     // (plaid-fetch v1.0.2 doesn't support user_id)

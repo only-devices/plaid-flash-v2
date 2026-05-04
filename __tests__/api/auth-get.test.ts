@@ -46,24 +46,6 @@ describe('POST /api/auth-get', () => {
     expect(mockAuthGet).toHaveBeenCalledWith({ access_token: 'access-sandbox-123' });
   });
 
-  it('returns 400 when access_token is missing', async () => {
-    const req = createRequest({});
-    const res = await POST(req);
-    const data = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(data.error).toBe('access_token is required');
-  });
-
-  it('returns 400 when access_token is not a string', async () => {
-    const req = createRequest({ access_token: 123 });
-    const res = await POST(req);
-    const data = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(data.error).toBe('access_token is required');
-  });
-
   it('returns Plaid error details when API returns error response', async () => {
     const plaidError = {
       error_type: 'INVALID_INPUT',

@@ -5,13 +5,6 @@ export async function POST(request: NextRequest) {
   try {
     const { access_token, client_transaction_id, amount } = await request.json();
 
-    if (!access_token) {
-      return NextResponse.json(
-        { error: 'access_token is required' },
-        { status: 400 }
-      );
-    }
-
     const plaid = createPlaidClient(request);
 
     // Get accounts to use the first account_id
@@ -20,13 +13,6 @@ export async function POST(request: NextRequest) {
     });
 
     const accountId = accountsResponse.accounts?.[0]?.account_id;
-    
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'No accounts found for this item' },
-        { status: 400 }
-      );
-    }
 
     const response = await plaid.signalEvaluate({
       access_token: access_token,

@@ -23,22 +23,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(errorBody, { status: error.response.status });
       } catch (parseError) {
         return NextResponse.json(
-          { 
-            error_code: 'INTERNAL_SERVER_ERROR',
-            error_message: error.message || 'Failed to exchange token',
-            display_message: 'Unable to exchange token. Please try again.'
-          },
+          { error_message: error.message || 'Failed to exchange token' },
           { status: error.response.status || 500 }
         );
       }
     }
     
     return NextResponse.json(
-      { 
-        error_code: 'INTERNAL_SERVER_ERROR',
-        error_message: error.message || 'Failed to exchange token',
-        display_message: 'Unable to exchange token. Please try again.'
-      },
+      { error_message: error.message || 'Failed to exchange token' },
       { status: 500 }
     );
   }
