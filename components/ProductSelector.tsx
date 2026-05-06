@@ -91,8 +91,8 @@ const ProductSelector: React.FC<ProductSelectorProps> = ({
             </button>
           );
 
-          // Disabled buttons don't hover reliably and product cards have overflow hidden,
-          // so attach the tooltip to a wrapper element (same style as SettingsToggle).
+          // Disabled buttons don't hover reliably and product cards have overflow
+          // hidden, so attach the tooltip to a wrapper element.
           if (disabled && reason) {
             return (
               <div key={product.id} className="product-card-tooltip-wrapper" data-tooltip={reason}>

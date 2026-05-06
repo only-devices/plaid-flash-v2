@@ -1,44 +1,23 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createPlaidClient } from '@/lib/server/plaidCredentials';
+import { withPlaidSdk } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { access_token, client_transaction_id, amount } = await request.json();
+  const { access_token, amount } = await request.json();
+  const plaid = createPlaidClient(request);
 
-    const plaid = createPlaidClient(request);
-
-    // Get accounts to use the first account_id
-    const accountsResponse = await plaid.accountsGet({
-      access_token: access_token,
-    });
-
+  return withPlaidSdk(async () => {
+    // Signal evaluate requires an account_id. Pull the first account from the
+    // Item so callers don't need to know one up front.
+    const accountsResponse = await plaid.accountsGet({ access_token });
     const accountId = accountsResponse.accounts?.[0]?.account_id;
 
-    const response = await plaid.signalEvaluate({
-      access_token: access_token,
+    return plaid.signalEvaluate({
+      access_token,
       account_id: accountId,
       client_transaction_id: `flash_txn_${Date.now()}`,
-      amount: amount || 100.00,
-      ruleset_key: 'default'
+      amount: amount || 100.0,
+      ruleset_key: 'default',
     } as any);
-
-    return NextResponse.json(response);
-  } catch (error: any) {
-    console.error('Error evaluating signal:', error);
-    
-    // If it's a Plaid error with a response, return the Plaid error details
-    if (error.response) {
-      const errorBody = await error.response.json().catch(() => ({ 
-        error: error.message || 'Failed to evaluate signal' 
-      }));
-      return NextResponse.json(errorBody, { status: error.response.status });
-    }
-    
-    // Otherwise return generic error
-    return NextResponse.json(
-      { error: error.message || 'Failed to evaluate signal' },
-      { status: 500 }
-    );
-  }
+  });
 }
-

@@ -5,9 +5,6 @@
 import { isMobileDevice } from '@/utils/deviceDetection';
 
 describe('isMobileDevice', () => {
-  const originalNavigator = window.navigator;
-  const originalInnerWidth = window.innerWidth;
-
   function mockUserAgent(ua: string) {
     Object.defineProperty(window, 'navigator', {
       value: {

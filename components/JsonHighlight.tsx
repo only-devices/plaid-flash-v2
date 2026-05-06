@@ -4,7 +4,6 @@ interface JsonHighlightProps {
   data: any;
   highlightKeys?: string[];
   showCopyButton?: boolean;
-  suppressCarbonButton?: boolean;
   expandableCopy?: {
     responseData: any;
     accessToken?: string | null;
@@ -18,7 +17,7 @@ interface JsonHighlightProps {
 // Generate unique ID for each component instance
 let instanceCounter = 0;
 
-export default function JsonHighlight({ data, highlightKeys = [], showCopyButton = true, suppressCarbonButton = false, expandableCopy }: JsonHighlightProps) {
+export default function JsonHighlight({ data, highlightKeys = [], showCopyButton = true, expandableCopy }: JsonHighlightProps) {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSliding, setIsSliding] = useState(false);

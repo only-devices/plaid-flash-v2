@@ -1,38 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createPlaidClient } from '@/lib/server/plaidCredentials';
+import { withPlaidSdk } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { public_token } = await request.json();
-
-    const plaid = createPlaidClient(request);
-
-    const response = await plaid.itemPublicTokenExchange({
-      public_token: public_token,
-    });
-
-    // Note: plaid-fetch returns data directly (no .data property)
-    return NextResponse.json({ access_token: response.access_token });
-  } catch (error: any) {
-    console.error('Error exchanging public token:', error);
-    
-    // Extract Plaid error details if available
-    if (error.response) {
-      try {
-        const errorBody = await error.response.json();
-        return NextResponse.json(errorBody, { status: error.response.status });
-      } catch (parseError) {
-        return NextResponse.json(
-          { error_message: error.message || 'Failed to exchange token' },
-          { status: error.response.status || 500 }
-        );
-      }
-    }
-    
-    return NextResponse.json(
-      { error_message: error.message || 'Failed to exchange token' },
-      { status: 500 }
-    );
-  }
+  const { public_token } = await request.json();
+  return withPlaidSdk(
+    () => createPlaidClient(request).itemPublicTokenExchange({ public_token }),
+    (response) => ({ access_token: response.access_token })
+  );
 }
-

@@ -1,23 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createPlaidClient } from '@/lib/server/plaidCredentials';
+import { withPlaidSdk } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { access_token } = await request.json();
-
-    const plaid = createPlaidClient(request);
-
-    await plaid.itemRemove({
-      access_token: access_token,
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('Error removing item:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to remove item' },
-      { status: 500 }
-    );
-  }
+  const { access_token } = await request.json();
+  return withPlaidSdk(
+    () => createPlaidClient(request).itemRemove({ access_token }),
+    () => ({ success: true })
+  );
 }
-

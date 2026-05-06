@@ -1,13 +1,9 @@
 import { generateClientUserId } from '@/lib/generateClientUserId';
 
 describe('generateClientUserId', () => {
-  it('generates a string with default prefix', () => {
+  it('generates a string with the default prefix', () => {
     const id = generateClientUserId();
     expect(id).toMatch(/^flash_user_[0-9a-f]+$/);
-  });
-
-  it('uses the default prefix when none is provided', () => {
-    const id = generateClientUserId();
     expect(id.startsWith('flash_user_')).toBe(true);
   });
 

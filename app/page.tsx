@@ -11,7 +11,7 @@ import SettingsPill from '@/components/SettingsPill';
 import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
-import { PRODUCTS_ARRAY, PRODUCT_CONFIGS, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
+import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
@@ -40,6 +40,31 @@ type HybridStep =
       isCRA: boolean;
     };
 
+// Pencil glyph used by every "edit JSON" affordance in the preview modals.
+const EditPencilIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+  </svg>
+);
+
+// Spinner + caption block reused by every "processing..." modal state.
+const LoadingModalBody = ({ message }: { message: React.ReactNode }) => (
+  <div className="modal-loading">
+    <div className="spinner"></div>
+    <p>{message}</p>
+  </div>
+);
+
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
@@ -49,16 +74,6 @@ export default function Home() {
   // wizard internally swaps to the post-Link "pick one" mode based on
   // `demoLinkCompleted`.
   const [showProductModal, setShowProductModal] = useState(false);
-  // No-op stubs for removed states. The "Let's Go" button and the child /
-  // grandchild ProductSelector modals no longer exist; the wizard owns
-  // those concerns. Keeping these as constant `false` + no-op setters
-  // preserves the existing call sites without an exhaustive sweep.
-  const showButton = false;
-  const setShowButton = (_: boolean) => {};
-  const showChildModal = false;
-  const setShowChildModal = (_: boolean) => {};
-  const showGrandchildModal = false;
-  const setShowGrandchildModal = (_: boolean) => {};
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [selectedChildProduct, setSelectedChildProduct] = useState<string | null>(null);
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
@@ -277,6 +292,17 @@ export default function Home() {
   const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
   const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
   const hostedLinkPopupRef = useRef<Window | null>(null);
+
+  // Reset all 5 hosted-link UI fields. Called from start-over paths and from
+  // the warm-up / success / failure branches of /link/token/create. Pass
+  // `active` and `url` to set the new session state in the same step.
+  const resetHostedLinkUi = (opts?: { active?: boolean; url?: string | null }) => {
+    setHostedLinkActive(opts?.active ?? false);
+    setHostedLinkUrl(opts?.url ?? null);
+    setHostedLinkManualPayload('');
+    setHostedLinkManualParseError(null);
+    setHostedLinkExtractedPublicTokens([]);
+  };
 
   // Layer state
   const [layerSessionActive, setLayerSessionActive] = useState(false);
@@ -614,104 +640,6 @@ export default function Home() {
     };
     loadCredentials();
   }, []);
-
-  const fetchLinkToken = async (productId: string) => {
-    try {
-      const productConfig = getProductConfigById(productId);
-      if (!productConfig) {
-        throw new Error('Product configuration not found');
-      }
-      const requestBody: any = {
-        products: productConfig.products,
-        required_if_supported_products: productConfig.required_if_supported
-      };
-
-      // Add additional link params if they exist (e.g., days_requested for transactions sync)
-      if (productConfig.additionalLinkParams) {
-        Object.assign(requestBody, productConfig.additionalLinkParams);
-      }
-
-      const response = await fetch('/api/create-link-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-      
-      const data = await response.json();
-      
-      // Check for API errors
-      if (response.status >= 400) {
-        if (hostedLinkEnabled) {
-          try {
-            hostedLinkPopupRef.current?.close();
-          } catch {
-            // ignore
-          }
-          hostedLinkPopupRef.current = null;
-        }
-        setErrorData(data);
-        setApiStatusCode(response.status);
-        setModalState('api-error');
-        setShowModal(true);
-        setShowWelcome(false);
-        return;
-      }
-      
-      setLinkToken(data.link_token);
-
-      if (hostedLinkEnabled) {
-        if (data.hosted_link_url) {
-          setHostedLinkActive(true);
-          setHostedLinkUrl(data.hosted_link_url);
-          setHostedLinkManualPayload('');
-          setHostedLinkManualParseError(null);
-          setHostedLinkExtractedPublicTokens([]);
-          setShowEventLogs(false);
-    
-          setModalState('hosted-waiting');
-          setShowModal(true);
-          window.open(data.hosted_link_url, '_blank', 'noopener,noreferrer');
-        } else {
-          // Avoid a blank screen if Plaid doesn't return hosted_link_url
-          if (hostedLinkEnabled) {
-            try {
-              hostedLinkPopupRef.current?.close();
-            } catch {
-              // ignore
-            }
-            hostedLinkPopupRef.current = null;
-          }
-          setHostedLinkActive(false);
-          setHostedLinkUrl(null);
-          setErrorData({
-            error_code: 'HOSTED_LINK_URL_MISSING',
-            error_message:
-              'Hosted Link is enabled, but Plaid did not return hosted_link_url from /link/token/create. Ensure the request includes hosted_link: {}.',
-            link_token: data.link_token,
-          });
-          setApiStatusCode(500);
-          setModalState('api-error');
-          setShowModal(true);
-          setShowWelcome(false);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching link token:', error);
-      setErrorMessage('Failed to initialize. Please try again.');
-      setModalState('error');
-      setShowModal(true);
-      setShowWelcome(false);
-      
-      // Reset after a delay
-      setTimeout(() => {
-        setShowModal(false);
-        setModalState('loading');
-        setShowProductModal(true);
-      }, 3000);
-    }
-  };
 
   // Find a leaf's location in the product tree so the existing per-product
   // API code paths (which key off selectedProduct/Child/Grandchild) keep
@@ -1866,7 +1794,6 @@ export default function Home() {
     
     // If we're starting Demo Mode, trigger the UI changes now
     if (isDemoModeStarting) {
-      setShowButton(false);
       setShowEventLogs(true);
       setEventLogsPosition('right');
       setIsDemoModeStarting(false); // Reset the flag
@@ -1889,11 +1816,7 @@ export default function Home() {
           hostedLinkPopupRef.current = null;
         }
 
-        setHostedLinkActive(true);
-        setHostedLinkUrl(null);
-        setHostedLinkManualPayload('');
-        setHostedLinkManualParseError(null);
-        setHostedLinkExtractedPublicTokens([]);
+        resetHostedLinkUi({ active: true });
         setShowEventLogs(false);
   
         setModalState('hosted-waiting');
@@ -1924,11 +1847,7 @@ export default function Home() {
 
       if (hostedLinkEnabled) {
         if (data.hosted_link_url) {
-          setHostedLinkActive(true);
-          setHostedLinkUrl(data.hosted_link_url);
-          setHostedLinkManualPayload('');
-          setHostedLinkManualParseError(null);
-          setHostedLinkExtractedPublicTokens([]);
+          resetHostedLinkUi({ active: true, url: data.hosted_link_url });
           setShowEventLogs(false);
     
           setModalState('hosted-waiting');
@@ -1993,20 +1912,17 @@ export default function Home() {
       setIsDemoModeStarting(false);
     }
     
-    // Navigate back through the 3-level hierarchy
+    // The wizard owns the 3-level (product / child / grandchild) hierarchy
+    // internally; clear the deepest selection and let it re-open at the right
+    // level.
     if (selectedGrandchildProduct) {
-      // Go back from grandchild to child modal
       setSelectedGrandchildProduct(null);
-      setShowGrandchildModal(true);
     } else if (selectedChildProduct) {
-      // Go back from child to parent modal
       setSelectedChildProduct(null);
-      setShowChildModal(true);
     } else {
-      // Go back to root product modal
       setSelectedProduct(null);
-      setShowProductModal(true);
     }
+    setShowProductModal(true);
   };
 
   const handleToggleEditMode = () => {
@@ -2066,11 +1982,7 @@ export default function Home() {
           hostedLinkPopupRef.current = null;
         }
 
-        setHostedLinkActive(true);
-        setHostedLinkUrl(null);
-        setHostedLinkManualPayload('');
-        setHostedLinkManualParseError(null);
-        setHostedLinkExtractedPublicTokens([]);
+        resetHostedLinkUi({ active: true });
         setShowEventLogs(false);
   
         setModalState('hosted-waiting');
@@ -2147,11 +2059,7 @@ export default function Home() {
 
         if (hostedLinkEnabled) {
           if (data.hosted_link_url) {
-            setHostedLinkActive(true);
-            setHostedLinkUrl(data.hosted_link_url);
-            setHostedLinkManualPayload('');
-            setHostedLinkManualParseError(null);
-            setHostedLinkExtractedPublicTokens([]);
+            resetHostedLinkUi({ active: true, url: data.hosted_link_url });
             setShowEventLogs(false);
       
             setModalState('hosted-waiting');
@@ -2997,7 +2905,6 @@ export default function Home() {
             setShowModal(false);
             setProductData(null);
             setModalState('loading');
-            setShowButton(true);
             setShowWelcome(false);
             setShowProductModal(true);
           }, 3000);
@@ -3099,9 +3006,6 @@ export default function Home() {
   };
 
   const onSuccess = useCallback((public_token: string, metadata: any) => {
-    // Hide the button
-    setShowButton(false);
-    
     const effectiveProductId = effectiveProductIdRef.current;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     const isUpdateMode = effectiveProductId === 'link-update-mode';
@@ -3575,7 +3479,6 @@ export default function Home() {
           setCallbackData(null);
           setProductData(null);
           setModalState('loading');
-          setShowButton(true);
           setShowWelcome(false);
           setShowProductModal(true);
         }, 3000);
@@ -3812,7 +3715,6 @@ export default function Home() {
         setAccountsData(null);
         setProductData(null);
         setModalState('loading');
-        setShowButton(true);
         setShowWelcome(false);
         setShowProductModal(true);
       }, 3000);
@@ -3855,7 +3757,6 @@ export default function Home() {
         setAccountsData(null);
         setProductData(null);
         setModalState('loading');
-        setShowButton(true);
         setShowWelcome(false);
         setShowProductModal(true);
       }, 3000);
@@ -3975,9 +3876,6 @@ export default function Home() {
   };
 
   const onExit = useCallback((err: any, metadata: any) => {
-    // Hide button
-    setShowButton(false);
-    
     const effectiveProductId = effectiveProductIdRef.current;
     const isUpdateMode = effectiveProductId === 'link-update-mode';
 
@@ -4008,7 +3906,6 @@ export default function Home() {
       setIsTransitioningModals(false);
       setCallbackData(null);
       setModalState('loading');
-      setShowButton(false);
       setShowWelcome(false);
 
       setAccountsData(null);
@@ -4116,7 +4013,6 @@ export default function Home() {
     setIsTransitioningModals(false);
     setCallbackData(null);
     setModalState('loading');
-    setShowButton(true);
     setShowWelcome(false);
     setMultiItemAccessTokens([]);
     setActiveMultiItemAccessTokenIndex(0);
@@ -4382,7 +4278,7 @@ export default function Home() {
     // In Demo Mode, we can open Link without a selected product
     // In normal mode, we need a selected product
     // Layer sessions manage opening Link via LAYER_READY (never auto-open here).
-    const shouldOpenLink = ready && linkToken && !layerSessionActive && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showChildModal && !showGrandchildModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
+    const shouldOpenLink = ready && linkToken && !layerSessionActive && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
       (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
@@ -4401,7 +4297,7 @@ export default function Home() {
         open();
       }
     }
-  }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showChildModal, showGrandchildModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
+  }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
 
   // Walk the wizard's `demoProductsVisibility` selections, expand them to
   // their leaf configs, and aggregate the union of `products` /
@@ -4638,15 +4534,8 @@ export default function Home() {
   const handleStartOver = async () => {
     // Hide product selector modals first
     setShowProductModal(false);
-    setShowChildModal(false);
-    setShowGrandchildModal(false);
-
     // Reset Hosted Link waiting UI
-    setHostedLinkActive(false);
-    setHostedLinkUrl(null);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
-    setHostedLinkExtractedPublicTokens([]);
+    resetHostedLinkUi();
 
     // Reset Cashflow Updates state
     setCashflowUpdatesItems([]);
@@ -4685,17 +4574,24 @@ export default function Home() {
       setLinkEvents([]);
       setShowEventLogs(false);
       setModalState('loading');
-      setShowButton(false);
       setShowWelcome(false);
       setShowProductModal(true);
       setErrorData(null);
       setErrorMessage('');
 
-      // Reset session state but preserve the user's product selection so
-      // the wizard reopens with the same pills checked (better UX for a
-      // "Reset Session" affordance than wiping their intent).
+      // Start Over wipes the session entirely: pending in-flight flow state
+      // (CRA bypass user-create handoff, demo-mode bootstrap configs) and
+      // the wizard's product selection are all reset so the next run starts
+      // from a clean slate. Without this, e.g. a leftover CRA pill from the
+      // previous flow would re-trigger /user/create on the next "Start" even
+      // when the user thinks they only picked a non-CRA product.
       setDemoLinkCompleted(false);
       setDemoAccessToken(null);
+      setDemoProductsVisibility({});
+      setIsDemoModeStarting(false);
+      setDemoPendingSandboxConfig(null);
+      setDemoPendingLinkTokenConfig(null);
+      setUsedUserToken(false);
 
       // Reset CRA state
       setUserCreateConfig(null);
@@ -4704,10 +4600,6 @@ export default function Home() {
       setIsEditingUserCreateConfig(false);
       setEditedUserCreateConfig('');
       setUserCreateConfigError(null);
-
-      // Reset webhook panel (but keep SSE connection open)
-
-
 
       // Reset embedded Link state
       setEmbeddedLinkActive(false);
@@ -4793,18 +4685,23 @@ export default function Home() {
     setLinkEvents([]);
     setShowEventLogs(false);
     setModalState('loading');
-    setShowButton(false);
     setShowWelcome(false);
     setShowProductModal(true);
     setErrorData(null);
     setErrorMessage('');
-    
-    // Reset session state but preserve the user's product selection so
-    // the wizard reopens with the same pills checked (better UX for a
-    // "Reset Session" affordance than wiping their intent).
+
+    // See note in the !autoRemoveEnabled branch above: Start Over is a full
+    // session reset, including any in-flight pending configs and the wizard
+    // selection. Otherwise leftover CRA pills can re-trigger /user/create on
+    // the next "Start" even when the user thinks they only picked non-CRA.
     setDemoLinkCompleted(false);
     setDemoAccessToken(null);
-    
+    setDemoProductsVisibility({});
+    setIsDemoModeStarting(false);
+    setDemoPendingSandboxConfig(null);
+    setDemoPendingLinkTokenConfig(null);
+    setUsedUserToken(false);
+
     // Reset CRA state
     setUserCreateConfig(null);
     setUserId(null);
@@ -4850,18 +4747,13 @@ export default function Home() {
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
     setModalState('loading');
-    setShowButton(false);
     setShowWelcome(false);
     setShowProductModal(true);
     setErrorData(null);
     setErrorMessage('');
 
     // Reset Hosted Link waiting UI
-    setHostedLinkActive(false);
-    setHostedLinkUrl(null);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
-    setHostedLinkExtractedPublicTokens([]);
+    resetHostedLinkUi();
     try {
       hostedLinkPopupRef.current?.close();
     } catch {
@@ -4916,11 +4808,7 @@ export default function Home() {
     const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
 
     // Reset Hosted Link waiting UI
-    setHostedLinkActive(false);
-    setHostedLinkUrl(null);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
-    setHostedLinkExtractedPublicTokens([]);
+    resetHostedLinkUi();
 
     if (!autoRemoveEnabled) {
       // Skip deletion entirely and just reset UI
@@ -4949,7 +4837,6 @@ export default function Home() {
       setShowEventLogs(false);
       setShowZapResetButton(false);
       setModalState('loading');
-      setShowButton(false);
       setShowWelcome(false);
       setShowProductModal(true);
 
@@ -5036,7 +4923,6 @@ export default function Home() {
     setShowEventLogs(false);
     setShowZapResetButton(false);
     setModalState('loading');
-    setShowButton(false);
     setShowWelcome(false);
     setShowProductModal(true);
 
@@ -5047,45 +4933,6 @@ export default function Home() {
     if (embeddedLinkHandlerRef.current?.destroy) {
       embeddedLinkHandlerRef.current.destroy();
       embeddedLinkHandlerRef.current = null;
-    }
-  };
-
-  const handleCopyAccessToken = async (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (accessToken) {
-      try {
-        await navigator.clipboard.writeText(accessToken);
-        // Add visual feedback
-        const button = event.currentTarget;
-        const originalText = button.textContent;
-        button.textContent = 'Copied!';
-        button.classList.add('copied');
-        setTimeout(() => {
-          button.textContent = originalText;
-          button.classList.remove('copied');
-        }, 2000);
-      } catch (error) {
-        console.error('Failed to copy:', error);
-      }
-    }
-  };
-
-
-  const handleCopyConfig = async (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (linkTokenConfig) {
-      try {
-        await navigator.clipboard.writeText(JSON.stringify(linkTokenConfig, null, 2));
-        // Add visual feedback
-        const button = event.currentTarget;
-        const originalText = button.textContent;
-        button.textContent = 'Copied!';
-        button.classList.add('copied');
-        setTimeout(() => {
-          button.textContent = originalText;
-          button.classList.remove('copied');
-        }, 2000);
-      } catch (error) {
-        console.error('Failed to copy:', error);
-      }
     }
   };
 
@@ -6048,10 +5895,7 @@ export default function Home() {
                   onClick={handleToggleLayerPhoneSubmitEditMode}
                   title="Edit configuration"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={layerPhoneSubmitConfig} />
               </div>
@@ -6109,10 +5953,7 @@ export default function Home() {
                   onClick={handleToggleLayerDobSubmitEditMode}
                   title="Edit configuration"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={layerDobSubmitConfig} />
               </div>
@@ -6154,37 +5995,25 @@ export default function Home() {
 
     if (modalState === 'layer-processing-session-get') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Fetching Layer session data...</p>
-        </div>
+        <LoadingModalBody message="Fetching Layer session data..." />
       );
     }
 
     if (modalState === 'layer-processing-user-update') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Updating CRA identity...</p>
-        </div>
+        <LoadingModalBody message="Updating CRA identity..." />
       );
     }
 
     if (modalState === 'layer-processing-check-report-create') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Creating CRA check report...</p>
-        </div>
+        <LoadingModalBody message="Creating CRA check report..." />
       );
     }
 
     if (modalState === 'layer-processing-identity-match') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Running Identity Match...</p>
-        </div>
+        <LoadingModalBody message="Running Identity Match..." />
       );
     }
 
@@ -6232,10 +6061,7 @@ export default function Home() {
                   onClick={handleToggleUserCreateEditMode}
                   title="Edit configuration"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={userCreateConfig} />
               </div>
@@ -6292,19 +6118,7 @@ export default function Home() {
             <>
               <div className="account-data config-data-with-edit">
                 <button className="config-edit-button" onClick={handleToggleUserUpdateEditMode} title="Edit configuration">
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={displayConfig} />
               </div>
@@ -6349,10 +6163,7 @@ export default function Home() {
 
     if (modalState === 'processing-user-create') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Creating user...</p>
-        </div>
+        <LoadingModalBody message="Creating user..." />
       );
     }
 
@@ -6375,10 +6186,7 @@ export default function Home() {
                   onClick={handleToggleEditMode}
                   title="Edit configuration"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={linkTokenConfig} />
               </div>
@@ -6441,10 +6249,7 @@ export default function Home() {
                   onClick={handleToggleSandboxConfigEditMode}
                   title="Edit configuration"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
+                  <EditPencilIcon />
                 </button>
                 <JsonHighlight data={sandboxConfig} />
               </div>
@@ -6498,7 +6303,6 @@ export default function Home() {
           <div className="account-data">
             <JsonHighlight 
               data={callbackData} 
-              suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
@@ -6598,7 +6402,6 @@ export default function Home() {
           <div className="account-data">
             <JsonHighlight 
               data={callbackData} 
-              suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
@@ -6625,7 +6428,6 @@ export default function Home() {
           <div className="account-data">
             <JsonHighlight 
               data={callbackData} 
-              suppressCarbonButton={true}
               expandableCopy={{
                 responseData: callbackData,
                 linkToken: linkToken,
@@ -6732,10 +6534,7 @@ export default function Home() {
 
     if (modalState === 'processing-accounts') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Exchanging token and fetching account data...</p>
-        </div>
+        <LoadingModalBody message="Exchanging token and fetching account data..." />
       );
     }
 
@@ -6886,10 +6685,7 @@ export default function Home() {
 
     if (modalState === 'cashflow-updates-loading-items') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Fetching your Items...</p>
-        </div>
+        <LoadingModalBody message="Fetching your Items..." />
       );
     }
 
@@ -6937,10 +6733,7 @@ export default function Home() {
 
     if (modalState === 'cashflow-updates-subscribing') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Subscribing to Cashflow Updates...</p>
-        </div>
+        <LoadingModalBody message="Subscribing to Cashflow Updates..." />
       );
     }
 
@@ -6976,10 +6769,7 @@ export default function Home() {
 
     if (modalState === 'cashflow-updates-fetching-report') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Fetching Monitoring Insights report...</p>
-        </div>
+        <LoadingModalBody message="Fetching Monitoring Insights report..." />
       );
     }
 
@@ -6989,28 +6779,19 @@ export default function Home() {
       const productName = productConfig?.name || 'Product';
       
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Fetching {productName} data...</p>
-        </div>
+        <LoadingModalBody message={`Fetching ${productName} data...`} />
       );
     }
 
     if (modalState === 'creating-sandbox-item') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Creating Sandbox item</p>
-        </div>
+        <LoadingModalBody message="Creating Sandbox item" />
       );
     }
 
     if (modalState === 'tidying-up') {
       return (
-        <div className="modal-loading">
-          <div className="spinner"></div>
-          <p>Tidying up</p>
-        </div>
+        <LoadingModalBody message="Tidying up" />
       );
     }
 
@@ -7119,10 +6900,7 @@ export default function Home() {
                     onClick={handleToggleEditProductApiMode}
                     title="Edit configuration"
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
+                    <EditPencilIcon />
                   </button>
                   <JsonHighlight data={displayConfig} />
                 </div>
@@ -7234,7 +7012,6 @@ export default function Home() {
             {productConfig?.returnsPdf ? (
               <PdfResponseViewer
                 base64={productData[productConfig.pdfResponseKey ?? 'pdf']}
-                filename="income-insights.pdf"
               />
             ) : isIncomeInsights && viewMode === 'visual' ? (
               <IncomeInsightsVisualization data={productData} />
@@ -7655,7 +7432,7 @@ export default function Home() {
                 {linkEvents.length > 0 ? (
                   linkEvents.map((event, index) => (
                     <div key={index} className={`event-log-item ${index % 2 === 0 ? 'even' : 'odd'}`}>
-                      <JsonHighlight data={event} showCopyButton={false} suppressCarbonButton={true} />
+                      <JsonHighlight data={event} showCopyButton={false} />
                     </div>
                   ))
                 ) : (
@@ -7747,7 +7524,6 @@ export default function Home() {
                     return (
                       <PdfResponseViewer
                         base64={productData[pdfKey]}
-                        filename="income-insights.pdf"
                       />
                     );
                   }

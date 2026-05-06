@@ -75,6 +75,8 @@ describe('POST /api/auth-get', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Network failure');
+    expect(data.error_message).toBe('Network failure');
+    // The internal 500 handler should not synthesize a Plaid-style error_code.
+    expect(data.error_code).toBeUndefined();
   });
 });

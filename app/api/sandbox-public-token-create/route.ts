@@ -1,65 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getPlaidKeys } from '@/lib/server/plaidCredentials';
+import { NextRequest } from 'next/server';
+import { applyUserIdOrToken, proxyPlaidJson } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { 
-      institution_id, 
-      initial_products, 
-      options, 
-      user_id, 
-      user_token 
-    } = body;
+  const { institution_id, initial_products, options, user_id, user_token } = await request.json();
 
-    const { clientId, secret } = getPlaidKeys(request);
+  const body: Record<string, unknown> = {
+    institution_id: institution_id || 'ins_109511',
+    initial_products: initial_products || ['auth'],
+  };
+  if (options) body.options = options;
+  applyUserIdOrToken(body, user_id, user_token);
 
-    // Build the sandbox config
-    const sandboxConfig: any = {
-      client_id: clientId,
-      secret: secret,
-      institution_id: institution_id || 'ins_109511',
-      initial_products: initial_products || ['auth'],
-    };
-
-    // Add options if provided
-    if (options) {
-      sandboxConfig.options = options;
-    }
-
-    // Add user_id or user_token for CRA products
-    if (user_id) {
-      sandboxConfig.user_id = user_id;
-    }
-    if (user_token) {
-      sandboxConfig.user_token = user_token;
-    }
-
-    // Make direct fetch call to sandbox endpoint
-    const response = await fetch(
-      `https://${process.env.PLAID_ENV || 'sandbox'}.plaid.com/sandbox/public_token/create`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(sandboxConfig),
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.log('Plaid sandbox error response:', JSON.stringify(data, null, 2));
-      return NextResponse.json(data, { status: response.status });
-    }
-
-    return NextResponse.json({ public_token: data.public_token });
-  } catch (error: any) {
-    console.error('Error creating sandbox public token:', error);
-    return NextResponse.json(
-      { error_message: error.message || 'Failed to create sandbox public token' },
-      { status: 500 }
-    );
-  }
+  return proxyPlaidJson(request, '/sandbox/public_token/create', body, {
+    transformOk: (data) => ({ public_token: data.public_token }),
+  });
 }

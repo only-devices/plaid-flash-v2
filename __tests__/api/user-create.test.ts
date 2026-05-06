@@ -137,6 +137,8 @@ describe('POST /api/user-create', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Connection refused');
+    expect(data.error_message).toBe('Connection refused');
+    // The internal 500 handler should not synthesize a Plaid-style error_code.
+    expect(data.error_code).toBeUndefined();
   });
 });

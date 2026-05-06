@@ -1,33 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createPlaidClient } from '@/lib/server/plaidCredentials';
+import { withPlaidSdk } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { access_token } = await request.json();
-
-    const plaid = createPlaidClient(request);
-
-    const response = await plaid.identityGet({
-      access_token: access_token,
-    });
-
-    return NextResponse.json(response);
-  } catch (error: any) {
-    console.error('Error fetching identity:', error);
-    
-    // If it's a Plaid error with a response, return the Plaid error details
-    if (error.response) {
-      const errorBody = await error.response.json().catch(() => ({ 
-        error: error.message || 'Failed to fetch identity' 
-      }));
-      return NextResponse.json(errorBody, { status: error.response.status });
-    }
-    
-    // Otherwise return generic error
-    return NextResponse.json(
-      { error: error.message || 'Failed to fetch identity' },
-      { status: 500 }
-    );
-  }
+  const { access_token } = await request.json();
+  return withPlaidSdk(() => createPlaidClient(request).identityGet({ access_token }));
 }
-

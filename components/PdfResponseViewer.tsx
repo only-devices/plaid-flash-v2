@@ -4,7 +4,6 @@ import React from 'react';
 
 type PdfResponseViewerProps = {
   base64: string;
-  filename?: string; // optional, not rendered; embedded viewer has its own download
 };
 
 export default function PdfResponseViewer({ base64 }: PdfResponseViewerProps) {

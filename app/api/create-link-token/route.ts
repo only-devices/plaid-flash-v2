@@ -1,94 +1,56 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { generateClientUserId } from '@/lib/generateClientUserId';
-import { getPlaidKeys } from '@/lib/server/plaidCredentials';
+import { proxyPlaidJson } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { products, required_if_supported_products, user_id, user_token, user, webhook, ...otherParams } = body;
-    const isUpdateMode =
-      (typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0) ||
-      (typeof user_token === 'string' && user_token.trim().length > 0) ||
-      (typeof user_id === 'string' && user_id.trim().length > 0);
+  const body = await request.json();
+  const { products, required_if_supported_products, user_id, user_token, user, webhook, ...otherParams } = body;
+  const isUpdateMode =
+    (typeof otherParams?.access_token === 'string' && otherParams.access_token.trim().length > 0) ||
+    (typeof user_token === 'string' && user_token.trim().length > 0) ||
+    (typeof user_id === 'string' && user_id.trim().length > 0);
 
-    // Default to auth if no products specified
-    const productsArray = products ?? (isUpdateMode ? undefined : ['auth']);
-    const requiredProducts = required_if_supported_products ?? [];
+  // Default to auth if no products specified (skipped in update mode where
+  // products come from the existing access_token / user).
+  const productsArray = products ?? (isUpdateMode ? undefined : ['auth']);
+  const requiredProducts = required_if_supported_products ?? [];
 
-    const { clientId, secret } = getPlaidKeys(request);
+  const hasUserKey = Object.prototype.hasOwnProperty.call(body ?? {}, 'user');
+  // Respect whether `user` was explicitly provided in the request body.
+  // If absent, we add the minimum required user block for non-CRA flows.
+  const shouldIncludeUser = hasUserKey ? true : !user_id && !user_token;
 
-    const hasUserKey = Object.prototype.hasOwnProperty.call(body ?? {}, 'user');
+  const linkTokenConfig: any = {
+    link_customization_name: 'flash',
+    client_name: 'Plaid Flash',
+    country_codes: ['US'],
+    language: 'en',
+    ...(Array.isArray(productsArray) && productsArray.length > 0 ? { products: productsArray } : {}),
+    ...(Array.isArray(requiredProducts) && requiredProducts.length > 0
+      ? { required_if_supported_products: requiredProducts }
+      : {}),
+  };
 
-    // Respect whether `user` was explicitly provided in the request body.
-    // If absent, we add the minimum required user block for non-CRA flows.
-    const shouldIncludeUser = hasUserKey ? true : (!user_id && !user_token);
-
-    const linkTokenConfig: any = {
-      client_id: clientId,
-      secret: secret,
-      link_customization_name: 'flash',
-      client_name: 'Plaid Flash',
-      country_codes: ['US'],
-      language: 'en',
-      ...(Array.isArray(productsArray) && productsArray.length > 0 ? { products: productsArray } : {}),
-      ...(Array.isArray(requiredProducts) && requiredProducts.length > 0 ? { required_if_supported_products: requiredProducts } : {})
-    };
-
-    if (shouldIncludeUser) {
-      // Plaid requires user.client_user_id whenever `user` is provided.
-      // If the caller didn't provide `user`, we only add client_user_id (no extra defaults).
-      const baseUser: any = (user && typeof user === 'object' && !Array.isArray(user)) ? user : {};
-      const rawClientUserId = typeof baseUser?.client_user_id === 'string' ? baseUser.client_user_id.trim() : '';
-      linkTokenConfig.user = { ...baseUser, client_user_id: rawClientUserId || generateClientUserId() };
-    }
-
-    // Add user_id or user_token for CRA products
-    if (user_id) {
-      linkTokenConfig.user_id = user_id;
-    }
-    if (user_token) {
-      linkTokenConfig.user_token = user_token;
-    }
-
-    // Add webhook URL if provided
-    if (webhook) {
-      linkTokenConfig.webhook = webhook;
-    }
-
-    // Merge any other additional params (including transactions if provided)
-    Object.assign(linkTokenConfig, otherParams);
-
-
-
-    // Make direct fetch call to bypass plaid-fetch's field stripping
-    // (plaid-fetch v1.0.2 doesn't support user_id in LinkTokenCreateRequest)
-    const response = await fetch(
-      `https://${process.env.PLAID_ENV || 'sandbox'}.plaid.com/link/token/create`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(linkTokenConfig),
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.log('Plaid error response:', JSON.stringify(data, null, 2));
-      return NextResponse.json(data, { status: response.status });
-    }
-
-    return NextResponse.json({
-      link_token: data.link_token,
-      ...(data.hosted_link_url ? { hosted_link_url: data.hosted_link_url } : {})
-    });
-  } catch (error: any) {
-    console.error('Error creating link token:', error);
-    return NextResponse.json(
-      { error_message: error.message || 'Failed to create link token' },
-      { status: 500 }
-    );
+  if (shouldIncludeUser) {
+    // Plaid requires user.client_user_id whenever `user` is provided.
+    // If the caller didn't provide one, we synthesize a stable random id.
+    const baseUser: any = user && typeof user === 'object' && !Array.isArray(user) ? user : {};
+    const rawClientUserId =
+      typeof baseUser?.client_user_id === 'string' ? baseUser.client_user_id.trim() : '';
+    linkTokenConfig.user = { ...baseUser, client_user_id: rawClientUserId || generateClientUserId() };
   }
+
+  if (user_id) linkTokenConfig.user_id = user_id;
+  if (user_token) linkTokenConfig.user_token = user_token;
+  if (webhook) linkTokenConfig.webhook = webhook;
+
+  // Forward any other additional params (e.g. transactions options)
+  Object.assign(linkTokenConfig, otherParams);
+
+  return proxyPlaidJson(request, '/link/token/create', linkTokenConfig, {
+    transformOk: (data) => ({
+      link_token: data.link_token,
+      ...(data.hosted_link_url ? { hosted_link_url: data.hosted_link_url } : {}),
+    }),
+  });
 }

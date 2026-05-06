@@ -1,33 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createPlaidClient } from '@/lib/server/plaidCredentials';
+import { withPlaidSdk } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { access_token } = await request.json();
-
-    const plaid = createPlaidClient(request);
-
-    const response = await plaid.investmentsHoldingsGet({
-      access_token: access_token,
-    });
-
-    return NextResponse.json(response);
-  } catch (error: any) {
-    console.error('Error getting investments holdings:', error);
-    
-    // If it's a Plaid error with a response, return the Plaid error details
-    if (error.response) {
-      const errorBody = await error.response.json().catch(() => ({ 
-        error: error.message || 'Failed to get investments holdings' 
-      }));
-      return NextResponse.json(errorBody, { status: error.response.status });
-    }
-    
-    // Otherwise return generic error
-    return NextResponse.json(
-      { error: error.message || 'Failed to get investments holdings' },
-      { status: 500 }
-    );
-  }
+  const { access_token } = await request.json();
+  return withPlaidSdk(() => createPlaidClient(request).investmentsHoldingsGet({ access_token }));
 }
-
