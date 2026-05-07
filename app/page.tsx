@@ -2462,7 +2462,7 @@ export default function Home() {
       setUseAltCredentials(tempUseAltCredentials);
     }
     setIncludePhoneNumber(tempIncludePhoneNumber);
-    setAlwaysUserCreate(tempAlwaysUserCreate);
+    setAlwaysUserCreate(tempAlwaysUserCreate || tempMultiItemLinkEnabled);
     setBypassLink(tempBypassLink);
     setUpdateModeEnabled(tempUpdateModeEnabled);
 
@@ -2529,7 +2529,12 @@ export default function Home() {
   const handleToggleMultiItemLink = () => {
     const next = !tempMultiItemLinkEnabled;
     setTempMultiItemLinkEnabled(next);
-    if (next) setTempUpdateModeEnabled(false);
+    if (next) {
+      setTempUpdateModeEnabled(false);
+      // Multi-item Link requires user_id, which only exists if /user/create
+      // ran. Force the toggle on so the wizard reflects what will happen.
+      setTempAlwaysUserCreate(true);
+    }
   };
 
   const handleToggleHostedLink = () => {
@@ -7276,8 +7281,14 @@ export default function Home() {
                     />
                     <SettingsPill
                       label="Always call /user/create first"
-                      checked={tempAlwaysUserCreate}
+                      checked={tempAlwaysUserCreate || tempMultiItemLinkEnabled}
                       onChange={handleToggleAlwaysUserCreate}
+                      disabled={tempMultiItemLinkEnabled}
+                      tooltip={
+                        tempMultiItemLinkEnabled
+                          ? 'Multi-item Link requires user_id, so /user/create is always called.'
+                          : undefined
+                      }
                     />
                   </div>
                 </div>
