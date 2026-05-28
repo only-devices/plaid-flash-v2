@@ -1,10 +1,12 @@
 import { NextRequest } from 'next/server';
-import { createPlaidClient } from '@/lib/server/plaidCredentials';
-import { withPlaidSdk } from '@/lib/server/plaidApi';
+import { proxyPlaidJson } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  const { access_token, user } = await request.json();
-  return withPlaidSdk(() =>
-    createPlaidClient(request).identityMatch({ access_token, user: user || {} })
-  );
+  const incoming = (await request.json()) || {};
+  // Plaid requires a `user` object; default to empty if the caller omitted it.
+  const body: Record<string, unknown> = {
+    user: {},
+    ...incoming,
+  };
+  return proxyPlaidJson(request, '/identity/match', body);
 }

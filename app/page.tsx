@@ -1147,7 +1147,19 @@ export default function Home() {
     setModalState('processing-user-create');
 
     try {
-      const configToUse = configOverride || userCreateConfig;
+      // Prefer unsaved edits from the editor so any extra params the user
+      // typed (without clicking Save) still get forwarded to Plaid.
+      let configToUse = configOverride;
+      if (configToUse == null && editedUserCreateConfig.trim()) {
+        try {
+          configToUse = JSON.parse(editedUserCreateConfig);
+        } catch {
+          // Invalid JSON in editor; fall back to the saved config below.
+        }
+      }
+      if (configToUse == null) {
+        configToUse = userCreateConfig;
+      }
       
       console.log('[Frontend] Creating user');
 
@@ -1588,7 +1600,18 @@ export default function Home() {
 
   const handleProceedWithUserUpdate = async (configOverride?: any) => {
     const pending = craLayerPendingAfterUserUpdate;
-    const configToUse = configOverride || userUpdateConfig;
+    // Prefer unsaved editor edits over the saved config.
+    let configToUse = configOverride;
+    if (configToUse == null && editedUserUpdateConfig.trim()) {
+      try {
+        configToUse = JSON.parse(editedUserUpdateConfig);
+      } catch {
+        // Invalid JSON in editor; fall back to saved config below.
+      }
+    }
+    if (configToUse == null) {
+      configToUse = userUpdateConfig;
+    }
     const validationError = validateUserUpdatePayload(configToUse);
 
     if (validationError) {
@@ -1611,12 +1634,16 @@ export default function Home() {
     setModalState('layer-processing-user-update');
     setShowModal(true);
     try {
+      // Forward the full edited payload (including any extra fields the user
+      // added) and only override user_id with the pending Layer context.
+      const { useAltCredentials: _useAltCredentials, ...userUpdateBody } =
+        configToUse && typeof configToUse === 'object' ? configToUse : {};
       const userUpdateResp = await fetch('/api/user-update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...userUpdateBody,
           user_id: pending.userId,
-          identity: configToUse.identity,
         }),
       });
       const userUpdateJson = await userUpdateResp.json();
@@ -1778,8 +1805,20 @@ export default function Home() {
 
   const handleProceedWithConfig = async (configOverride?: any) => {
     // User approved the config, now fetch the link token using the (potentially edited) linkTokenConfig
-    // In Zap Mode, configOverride is passed directly to avoid state timing issues
-    const configToUse = configOverride || linkTokenConfig;
+    // In Zap Mode, configOverride is passed directly to avoid state timing issues.
+    // Prefer unsaved editor edits over the saved config so any extra params
+    // the user typed (without clicking Save) still flow through.
+    let configToUse = configOverride;
+    if (configToUse == null && editedConfig.trim()) {
+      try {
+        configToUse = JSON.parse(editedConfig);
+      } catch {
+        // Invalid JSON in editor; fall back to saved config below.
+      }
+    }
+    if (configToUse == null) {
+      configToUse = linkTokenConfig;
+    }
     const validationError = validateLinkTokenCreateConfig(configToUse);
     if (validationError) {
       setConfigError(validationError);
@@ -2722,8 +2761,18 @@ export default function Home() {
     setShowModal(true);
     
     try {
-      // Use the configOverride if provided, otherwise use sandboxConfig state
-      const configToUse = sandboxConfigOverride || sandboxConfig;
+      // Prefer unsaved editor edits over the saved sandbox config.
+      let configToUse = sandboxConfigOverride;
+      if (configToUse == null && editedSandboxConfig.trim()) {
+        try {
+          configToUse = JSON.parse(editedSandboxConfig);
+        } catch {
+          // Invalid JSON in editor; fall back to saved config below.
+        }
+      }
+      if (configToUse == null) {
+        configToUse = sandboxConfig;
+      }
       
       // Call /sandbox/public_token/create
       const response = await fetch('/api/sandbox-public-token-create', {
@@ -5366,10 +5415,22 @@ export default function Home() {
     const effectiveProductId = productIdOverride || selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
     if (!productConfig?.isCRA || !productConfig.apiEndpoint) return;
-    if (!userId) {
+
+    // Match the param used at /link/token/create. Layer + CRA always sets
+    // user_id upstream (legacy user_token is blocked for Layer), but the
+    // wizard picker path also routes non-Layer CRA flows here, where
+    // legacy user_token is valid and userId is null.
+    const baseParams: any = {};
+    if (usedUserToken && userToken) {
+      baseParams.user_token = userToken;
+    } else if (userId) {
+      baseParams.user_id = userId;
+    } else if (userToken) {
+      baseParams.user_token = userToken;
+    } else {
       setErrorData({
-        error: 'MISSING_USER_ID',
-        message: 'Missing user_id for CRA report fetch.',
+        error: 'MISSING_USER',
+        message: 'Missing user_id/user_token for CRA report fetch.',
       });
       setApiStatusCode(400);
       setModalState('api-error');
@@ -5377,7 +5438,7 @@ export default function Home() {
       return;
     }
 
-    const requestBody = buildProductRequestBody({ user_id: userId }, productConfig);
+    const requestBody = buildProductRequestBody(baseParams, productConfig);
     setProductApiConfig(requestBody);
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
@@ -5388,6 +5449,8 @@ export default function Home() {
     selectedChildProduct,
     selectedProduct,
     userId,
+    userToken,
+    usedUserToken,
     buildProductRequestBody,
   ]);
 

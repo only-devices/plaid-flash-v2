@@ -1,19 +1,22 @@
 import { NextRequest } from 'next/server';
-import { createPlaidClient } from '@/lib/server/plaidCredentials';
-import { withPlaidSdk } from '@/lib/server/plaidApi';
+import { proxyPlaidJson } from '@/lib/server/plaidApi';
+
+const formatDate = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export async function POST(request: NextRequest) {
-  const { access_token, start_date, end_date } = await request.json();
+  const incoming = (await request.json()) || {};
   // Default to the last 30 days when no range is provided.
-  const startDateObj = start_date
-    ? new Date(start_date)
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const endDateObj = end_date ? new Date(end_date) : new Date();
-  return withPlaidSdk(() =>
-    createPlaidClient(request).investmentsTransactionsGet({
-      access_token,
-      start_date: startDateObj,
-      end_date: endDateObj,
-    })
-  );
+  const today = new Date();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const body: Record<string, unknown> = {
+    start_date: formatDate(thirtyDaysAgo),
+    end_date: formatDate(today),
+    ...incoming,
+  };
+  return proxyPlaidJson(request, '/investments/transactions/get', body);
 }

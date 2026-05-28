@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server';
-import { createPlaidClient } from '@/lib/server/plaidCredentials';
-import { withPlaidSdk } from '@/lib/server/plaidApi';
+import { proxyPlaidJson } from '@/lib/server/plaidApi';
 
 export async function POST(request: NextRequest) {
-  const { access_token, investments_auth } = await request.json();
-  const requestBody: any = { access_token };
-  if (investments_auth) requestBody.options = investments_auth;
-  return withPlaidSdk(() => createPlaidClient(request).investmentsAuthGet(requestBody));
+  const { investments_auth, ...rest } = (await request.json()) || {};
+  // Backwards-compat: callers historically passed `investments_auth`, which
+  // Plaid expects under `options`. Honor an existing `options` if provided.
+  const body: Record<string, unknown> = { ...rest };
+  if (investments_auth && body.options == null) {
+    body.options = investments_auth;
+  }
+  return proxyPlaidJson(request, '/investments/auth/get', body);
 }
