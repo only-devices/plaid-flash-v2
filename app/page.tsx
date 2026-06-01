@@ -10,6 +10,7 @@ import CodeEditor from '@uiw/react-textarea-code-editor';
 import SettingsPill from '@/components/SettingsPill';
 import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
+import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
@@ -2265,7 +2266,9 @@ export default function Home() {
         const tokenToUse = accessTokenRef.current || accessToken;
         const bodyToSend: any = { ...parsed };
         // Internal-only: always force the current session access_token for non-CRA.
-        if (!productConfig.isCRA) {
+        // Skip entirely for leaves marked `noAccessToken` (e.g. /transactions/enrich)
+        // since they don't operate on a Plaid Item.
+        if (!productConfig.isCRA && !productConfig.noAccessToken) {
           if (!tokenToUse) throw new Error('Missing access_token for product API call');
           bodyToSend.access_token = tokenToUse;
         }
@@ -2348,7 +2351,9 @@ export default function Home() {
       const tokenToUse = accessTokenRef.current || accessToken;
       const bodyToSend: any = { ...(configToUse || {}) };
       // Internal-only: always force the current session access_token for non-CRA.
-      if (!productConfig.isCRA) {
+      // Skip entirely for leaves marked `noAccessToken` (e.g. /transactions/enrich)
+      // since they don't operate on a Plaid Item.
+      if (!productConfig.isCRA && !productConfig.noAccessToken) {
         if (!tokenToUse) throw new Error('Missing access_token for product API call');
         bodyToSend.access_token = tokenToUse;
       }
@@ -2423,7 +2428,15 @@ export default function Home() {
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = getProductConfigById(effectiveProductId!);
     
-    if (productConfig?.isCRA) {
+    if (productConfig?.noAccessToken) {
+      // Bypass-Link products (e.g. Enrich): no preceding Link or accounts step,
+      // so return to the product wizard.
+      setSelectedProduct(null);
+      setSelectedChildProduct(null);
+      setSelectedGrandchildProduct(null);
+      setEditedProductApiConfig('');
+      setShowProductModal(true);
+    } else if (productConfig?.isCRA) {
       // CRA products: go back to callback-success modal
       setModalState('callback-success');
       setShowModal(true);
@@ -2633,8 +2646,40 @@ export default function Home() {
   };
 
   // Wizard pill toggle: pills are always leaves, so just flip the bit.
+  // Leaves marked `noAccessToken` (e.g. /transactions/enrich) bypass Link
+  // entirely and launch their dedicated preview-product-api flow on click,
+  // rather than entering the multi-product selection set.
   const handleToggleWizardLeaf = (leafId: string) => {
+    const cfg = getProductConfigById(leafId);
+    if (cfg?.noAccessToken) {
+      handleStartNoAccessTokenLeaf(leafId);
+      return;
+    }
     setDemoProductsVisibility((prev) => ({ ...prev, [leafId]: !prev[leafId] }));
+  };
+
+  // Bypass-Link entry point used by leaves with `noAccessToken: true`. Opens
+  // the existing preview-product-api modal pre-populated with the leaf's
+  // `sampleApiBody`, so the user can edit and submit the request body
+  // verbatim to the leaf's `apiEndpoint`.
+  const handleStartNoAccessTokenLeaf = (leafId: string) => {
+    const cfg = getProductConfigById(leafId);
+    if (!cfg || !cfg.apiEndpoint) return;
+
+    setSelectionForLeaf(leafId);
+
+    const initialBody = cfg.sampleApiBody
+      ? JSON.parse(JSON.stringify(cfg.sampleApiBody))
+      : {};
+    setProductApiConfig(initialBody);
+    setEditedProductApiConfig(JSON.stringify(initialBody, null, 2));
+    setIsEditingProductApiConfig(false);
+    setProductApiConfigError(null);
+
+    setShowProductModal(false);
+    setModalState('preview-product-api');
+    setShowModal(true);
+    setShowWelcome(false);
   };
 
   // Wizard "Start" button: hide the wizard before kicking off the runner
@@ -7020,6 +7065,8 @@ export default function Home() {
       const apiTitle = productConfig?.apiTitle || 'API Response';
       const isCRA = productConfig?.isCRA;
       const isIncomeInsights = effectiveProductId === 'cra-income-insights';
+      const isEnrich = effectiveProductId === 'transactions-enrich';
+      const supportsVisualToggle = isIncomeInsights || isEnrich;
       
       return (
         <div className="modal-success">
@@ -7049,8 +7096,8 @@ export default function Home() {
             )}
           </div>
 
-          {/* Tab buttons for CRA Income Insights */}
-          {isIncomeInsights && (
+          {/* Tab buttons for products with a Visual view (Income Insights, Enrich) */}
+          {supportsVisualToggle && (
             <div className="view-mode-tabs">
               <button
                 className={`view-mode-tab ${viewMode === 'json' ? 'active' : ''}`}
@@ -7083,6 +7130,8 @@ export default function Home() {
               />
             ) : isIncomeInsights && viewMode === 'visual' ? (
               <IncomeInsightsVisualization data={productData} />
+            ) : isEnrich && viewMode === 'visual' ? (
+              <EnrichVisualization data={productData} />
             ) : (
               <JsonHighlight 
                 data={productData} 

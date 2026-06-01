@@ -2736,6 +2736,166 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   font-size: 16px;
 }
 
+/* Enrich Visualization (ledger) */
+.enrich-visualization {
+  padding: 8px;
+  animation: fadeIn 0.7s ease-out 0.2s backwards;
+}
+
+.enrich-amount-inflow {
+  color: #4ab19d;
+}
+
+.enrich-amount-outflow {
+  color: var(--text-primary);
+}
+
+.enrich-ledger {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-chart);
+  border: 1px solid var(--border-divider);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.enrich-ledger-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-divider);
+  transition: background 0.2s ease;
+}
+
+.enrich-ledger-row:last-child {
+  border-bottom: none;
+}
+
+.enrich-ledger-row:hover {
+  background: var(--surface-card-hover);
+}
+
+.enrich-ledger-logo {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.enrich-ledger-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.enrich-ledger-logo-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.enrich-ledger-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.enrich-ledger-merchant {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.enrich-ledger-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.enrich-ledger-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.enrich-ledger-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.enrich-ledger-tag--category {
+  background: var(--viz-card-bg);
+  border-color: var(--viz-card-border);
+  color: var(--text-primary);
+}
+
+.enrich-ledger-tag--location {
+  font-family: inherit;
+  text-transform: none;
+}
+
+.enrich-ledger-tag-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.enrich-ledger-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 110px;
+}
+
+.enrich-ledger-amount-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.enrich-ledger-amount-currency {
+  font-size: 10px;
+  color: var(--text-faint-2);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
 /* Responsive Design for Visualization */
 @media (max-width: 768px) {
   .viz-summary-cards {
@@ -2771,6 +2931,22 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   .view-mode-tab {
     flex: 1;
     justify-content: center;
+  }
+
+  .enrich-ledger-row {
+    grid-template-columns: 44px 1fr auto;
+    padding: 12px 14px;
+    gap: 12px;
+  }
+
+  .enrich-ledger-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .enrich-ledger-amount {
+    min-width: 90px;
   }
 }
 

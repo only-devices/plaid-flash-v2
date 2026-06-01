@@ -38,6 +38,8 @@ export interface ProductConfig {
   layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
   returnsPdf?: boolean; // When true, success step renders a PDF viewer instead of JSON
   pdfResponseKey?: string; // Key in API response holding base64 PDF (default 'pdf')
+  noAccessToken?: boolean; // When true, leaf does not require Link or access_token (e.g., /transactions/enrich)
+  sampleApiBody?: Record<string, any>; // Pre-populated request body for the preview-product-api JSON editor
 }
 
 export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
@@ -284,6 +286,79 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         apiTitle: '/liabilities/get',
         highlightKeys: ['liabilities'],
         icon: '/icons/liabilities.png'
+      },
+      {
+        id: 'enrich',
+        name: 'Enrich',
+        shortName: 'Enrich',
+        products: [],
+        required_if_supported: [],
+        gradient: 'linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%)',
+        icon: '/icons/transactions.png',
+        children: [
+          {
+            id: 'transactions-enrich',
+            name: 'Enrich',
+            shortName: 'Enrich',
+            products: [],
+            required_if_supported: [],
+            gradient: 'linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%)',
+            icon: '/icons/transactions.png',
+            apiEndpoint: '/api/transactions-enrich',
+            apiTitle: '/transactions/enrich',
+            noAccessToken: true,
+            highlightKeys: ['enriched_transactions'],
+            sampleApiBody: {
+              account_type: 'depository',
+              transactions: [
+                {
+                  id: '101',
+                  description: 'GRUBHUBCHICKFILA',
+                  amount: 30.28,
+                  direction: 'OUTFLOW',
+                  iso_currency_code: 'USD',
+                },
+                {
+                  id: '102',
+                  description: 'WAWA 915 MEDFORD NJ',
+                  amount: 49.61,
+                  direction: 'OUTFLOW',
+                  iso_currency_code: 'USD',
+                },
+                {
+                  id: '103',
+                  description: 'HOME DEPOT',
+                  amount: 115.23,
+                  direction: 'OUTFLOW',
+                  iso_currency_code: 'USD',
+                  location: { city: 'CAMPBELL', region: 'CA' },
+                },
+                {
+                  id: '104',
+                  description: 'MTA*NYCT PAYGO',
+                  amount: 2.75,
+                  direction: 'OUTFLOW',
+                  iso_currency_code: 'USD',
+                },
+                {
+                  id: '105',
+                  description: 'WAL-MART ASSOCS. PAYROLL',
+                  amount: 1058.23,
+                  direction: 'INFLOW',
+                  iso_currency_code: 'USD',
+                },
+                {
+                  id: '106',
+                  description: 'PURCHASE WM SUPERCENTER #1700',
+                  amount: 72.1,
+                  direction: 'OUTFLOW',
+                  iso_currency_code: 'USD',
+                  location: { city: 'POWAY', region: 'CA' },
+                },
+              ],
+            },
+          },
+        ],
       },
     ]
   },
