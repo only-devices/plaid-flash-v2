@@ -307,7 +307,7 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiEndpoint: '/api/transactions-enrich',
             apiTitle: '/transactions/enrich',
             noAccessToken: true,
-            highlightKeys: ['enriched_transactions'],
+            highlightKeys: [''],
             sampleApiBody: {
               account_type: 'depository',
               transactions: [
