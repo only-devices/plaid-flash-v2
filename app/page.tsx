@@ -3223,13 +3223,23 @@ export default function Home() {
     setEventLogsPosition('right');
     setIsTransitioningModals(false);
 
+    // Layer sessions return a profile token (not a public_token), which must
+    // go through /user_account/session/get rather than the plain
+    // /item/public_token/exchange. Skip the Demo Mode bootstrap exchange below
+    // and fall through to the Layer branches, which re-enter the Demo Mode
+    // picker once an access_token is available.
+    const proceedPublicToken: string | null =
+      typeof callbackData?.public_token === 'string' ? callbackData.public_token : null;
+    const isLayerCallback =
+      layerSessionActive || (!!proceedPublicToken && proceedPublicToken.startsWith('profile-'));
+
     // Demo Mode bootstrap: no single product is selected yet. CRA-only Link
     // flows don't return a public_token, so skip the exchange in that case
     // and surface the post-Link picker; the picker routes CRA products
     // through handleDemoModeApiCall, which jumps straight to the product
     // API preview (no manual USER_CHECK_REPORT_READY paste step).
-    if (demoMode && !demoLinkCompleted) {
-      const public_token = typeof callbackData?.public_token === 'string' ? callbackData.public_token : '';
+    if (demoMode && !demoLinkCompleted && !isLayerCallback) {
+      const public_token = proceedPublicToken || '';
 
       if (!public_token) {
         setDemoLinkCompleted(true);
@@ -3274,8 +3284,7 @@ export default function Home() {
     // Get the effective product ID to check product type
     const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
     const productConfig = getProductConfigById(effectiveProductId!);
-    const callbackPublicToken: string | null =
-      typeof callbackData?.public_token === 'string' ? callbackData.public_token : null;
+    const callbackPublicToken = proceedPublicToken;
     const isLayerProfileToken = !!callbackPublicToken && callbackPublicToken.startsWith('profile-');
 
     // Link-only: Update Mode does not run downstream APIs or cleanup; return to main menu.
@@ -3585,7 +3594,7 @@ export default function Home() {
     }
     
     // Layer flow (non-CRA): get access_token + identity via /user_account/session/get
-    if (layerMode && layerSessionActive) {
+    if (layerMode && (layerSessionActive || isLayerProfileToken)) {
       try {
         const { public_token } = callbackData || {};
         if (!public_token) {
