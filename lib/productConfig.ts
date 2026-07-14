@@ -84,7 +84,10 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiTitle: '/signal/evaluate',
             additionalApiParams: {
               amount: 100.00
-            }
+            },
+            // Same payments Layer template as Auth — Signal runs after Layer
+            // returns an access_token for the linked Item.
+            layerTemplateId: 'template_zpynxmk2g4tr'
           },
           {
             id: 'signal-balance',
@@ -96,7 +99,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             icon: '/icons/balance.png',
             apiEndpoint: '/api/signal-balance',
             apiTitle: '/accounts/balance/get',
-            highlightKeys: ['balances']
+            highlightKeys: ['balances'],
+            layerTemplateId: 'template_zpynxmk2g4tr'
           }
         ]
       },

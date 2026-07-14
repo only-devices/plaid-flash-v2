@@ -391,10 +391,7 @@ export default function Home() {
 
       if (
         layerMode &&
-        (productId === 'signal' ||
-          productId === 'signal-evaluate' ||
-          productId === 'signal-balance' ||
-          productId === 'investments-move' ||
+        (productId === 'investments-move' ||
           productId === 'link-update-mode' ||
           productId === 'link-upgrade-mode')
       ) {
@@ -773,12 +770,12 @@ export default function Home() {
   const runNonCraFlowWithAccessToken = useCallback(
     async (access_token: string) => {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
-      if (!effectiveProductId) return;
 
       // Store access token for cleanup
       setAccessToken(access_token);
 
-      // If in Demo Mode, store access token and show product selector
+      // If in Demo Mode, store access token and show product selector.
+      // Demo Mode does not require a selected leaf yet (post-Link pick UI).
       if (demoMode) {
         setDemoAccessToken(access_token);
         setDemoLinkCompleted(true);
@@ -786,6 +783,8 @@ export default function Home() {
         setShowProductModal(true);
         return;
       }
+
+      if (!effectiveProductId) return;
 
       const skipAccountsGet = effectiveProductId === 'signal-balance';
 
@@ -4495,6 +4494,63 @@ export default function Home() {
     // selections — Upgrade Mode is its own branch.
     if (demoProductsVisibility['link-upgrade-mode']) {
       showLinkConfigPreview('link-upgrade-mode');
+      return;
+    }
+
+    // Layer owns its own entry path (/user/create → /session/token/create →
+    // phone/DOB submit → Link). Do not build a /link/token/create config
+    // while Layer is on — that would skip the Layer session entirely.
+    if (layerMode) {
+      if (!effectiveWebhookConfigUrl) {
+        setErrorData({
+          error: 'WEBHOOK_URL_REQUIRED',
+          message: 'Configure a webhook URL in Settings before using Layer.',
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      if (useLegacyUserToken) {
+        setErrorData({
+          error: 'LAYER_LEGACY_UNSUPPORTED',
+          message: 'Layer requires user_id. Disable legacy user_token to continue.',
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      const { selectedLeafConfigs } = resolveSelectedLinkProducts();
+      if (selectedLeafConfigs.length === 0) {
+        setErrorData({
+          error: 'LAYER_NO_PRODUCTS_SELECTED',
+          message: 'Select at least one product before starting Layer.',
+        });
+        setApiStatusCode(400);
+        setModalState('api-error');
+        setShowModal(true);
+        setShowWelcome(false);
+        return;
+      }
+
+      // Prefer a leaf with an explicit Layer template (CRA template when CRA
+      // is selected); otherwise fall back to the first selected leaf and let
+      // createLayerSessionToken use DEFAULT_LAYER_TEMPLATE_ID.
+      const leafForLayer =
+        selectedLeafConfigs.find((c) => c.isCRA && c.layerTemplateId) ||
+        selectedLeafConfigs.find((c) => c.layerTemplateId) ||
+        selectedLeafConfigs[0];
+      const productIdForLayer = leafForLayer.id;
+
+      setSelectionForLeaf(productIdForLayer);
+      setLayerPendingUserCreate(true);
+      setLayerPendingProductId(productIdForLayer);
+      showUserCreatePreview(productIdForLayer);
       return;
     }
 
