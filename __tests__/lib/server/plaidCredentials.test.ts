@@ -162,7 +162,7 @@ describe('plaidCredentials', () => {
 
       expect(Configuration).toHaveBeenCalledWith(
         expect.objectContaining({
-          basePath: 'https://production.plaid.com',
+          basePath: 'https://sandbox.plaid.com',
         })
       );
     });

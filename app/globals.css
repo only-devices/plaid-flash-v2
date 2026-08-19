@@ -1710,7 +1710,6 @@ body:has(.event-logs-container.visible) iframe[id^="plaid-link-iframe"] {
   width: 600px !important;
   max-width: 45vw !important;
   height: 800px !important;
-  max-height: 85vh !important;
   transform: translate(calc(-100% - 40px), -50%) !important;
   right: auto !important;
   bottom: auto !important;
