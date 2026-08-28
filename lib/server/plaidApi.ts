@@ -67,8 +67,11 @@ export async function plaidJsonFetch(
 ): Promise<{ response: Response; data: any }> {
   const { clientId, secret } = getPlaidKeys(request);
   const credentialsIn = options?.credentialsIn ?? 'body';
+  // Credentials must win over anything in the editor payload. Spreading
+  // `body` last would let a pasted client_id/secret override env keys
+  // (or drop them entirely if those fields are null/undefined).
   const requestBody =
-    credentialsIn === 'headers' ? body : { client_id: clientId, secret, ...body };
+    credentialsIn === 'headers' ? body : { ...body, client_id: clientId, secret };
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (credentialsIn === 'headers') {
     headers['PLAID-CLIENT-ID'] = clientId;
@@ -125,7 +128,7 @@ export async function proxyPlaidJsonOrPdf(
     const response = await fetch(`${PLAID_BASE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, secret, ...body }),
+      body: JSON.stringify({ ...body, client_id: clientId, secret }),
     });
     const contentType = response.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {

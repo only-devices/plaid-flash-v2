@@ -90,6 +90,26 @@ describe('POST /api/user-create', () => {
     expect(data.user_token).toBe('user-token-legacy');
   });
 
+  it('does not let editor-supplied client_id/secret override server credentials', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ user_id: 'user_abc' }),
+    });
+
+    const req = createRequest({
+      client_id: 'spoofed_client',
+      secret: 'spoofed_secret',
+      client_user_id: 'client-id',
+    });
+    await POST(req);
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.client_id).toBe('test_client_id');
+    expect(body.secret).toBe('test_secret');
+    expect(body.client_user_id).toBe('client-id');
+  });
+
   it('strips useLegacyUserToken from the request body', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

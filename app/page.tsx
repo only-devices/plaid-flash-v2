@@ -18,6 +18,7 @@ import { generateClientUserId } from '@/lib/generateClientUserId';
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
 const THEME_STORAGE_KEY = 'plaid_flash_theme';
 const DEFAULT_LAYER_TEMPLATE_ID = 'template_5xk9wmaarmlp';
+const ALT_LAYER_TEMPLATE_ID = 'template_zpynxmk2g4tr';
 const DEFAULT_LAYER_PHONE_NUMBER = '+14155550011';
 const DEFAULT_LAYER_DATE_OF_BIRTH = '1975-01-18';
 
@@ -66,6 +67,20 @@ const LoadingModalBody = ({ message }: { message: React.ReactNode }) => (
   </div>
 );
 
+function stripSessionTokenCredentials(config: any) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+  const { client_id: _clientId, secret: _secret, ...rest } = config;
+  return rest;
+}
+
+// /session/token/create only accepts the new User API id (`usr_…`).
+// Legacy user_token and unprefixed user_id are not valid on Layer.
+function plaidUserIdForSessionToken(data: any): string | null {
+  const userId = typeof data?.user_id === 'string' ? data.user_id.trim() : '';
+  if (userId.startsWith('usr_')) return userId;
+  return null;
+}
+
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
@@ -96,6 +111,7 @@ export default function Home() {
     | 'layer-identity-match-results'
     | 'preview-user-create'
     | 'preview-user-update'
+    | 'preview-session-token'
     | 'preview-config'
     | 'preview-sandbox-config'
     | 'preview-product-api'
@@ -181,6 +197,10 @@ export default function Home() {
   // selected products' Link config.
   const [updateModeEnabled, setUpdateModeEnabled] = useState(false);
   const [tempUpdateModeEnabled, setTempUpdateModeEnabled] = useState(false);
+  // Set by Settings Save when Layer (or Layer Identity Match) is on so the
+  // Layer session starts immediately instead of returning to the wizard.
+  const [pendingLayerStart, setPendingLayerStart] = useState(false);
+  const pendingLayerStartRef = useRef(false);
   // Mirror Update Mode state in a ref so memoized success/exchange callbacks
   // (which only re-create on their own deps) always observe the latest value.
   const updateModeEnabledRef = useRef(false);
@@ -323,6 +343,10 @@ export default function Home() {
   );
   const [layerDobSubmitConfigError, setLayerDobSubmitConfigError] = useState<string | null>(null);
   const [layerIdentityMatchData, setLayerIdentityMatchData] = useState<any>(null);
+  const [sessionTokenConfig, setSessionTokenConfig] = useState<any>(null);
+  const [isEditingSessionTokenConfig, setIsEditingSessionTokenConfig] = useState(false);
+  const [editedSessionTokenConfig, setEditedSessionTokenConfig] = useState('');
+  const [sessionTokenConfigError, setSessionTokenConfigError] = useState<string | null>(null);
 
   // Update Mode (Link-only) state
   const [updateModeAccessTokenInput, setUpdateModeAccessTokenInput] = useState<string>('');
@@ -377,20 +401,29 @@ export default function Home() {
     return leafs;
   }, []);
 
+  const layerFlowEnabled = layerMode || layerIdentityMatchEnabled;
+
   const getProductDisableInfo = useCallback(
     (productId: string) => {
       const cfg = getProductConfigById(productId);
       const isLeaf = !!cfg?.apiEndpoint;
 
+      if (layerFlowEnabled) {
+        return {
+          disabled: true,
+          reason: 'Disable Layer in settings to enable product selection.',
+        };
+      }
+
       if (layerMode && useLegacyUserToken && isLeaf && cfg?.isCRA) {
         return {
           disabled: true,
-          reason: 'Layer + CRA requires user_id. Disable legacy user_token to continue.',
+          reason: 'Layer is not compatible with legacy user_token. Disable it to continue.',
         };
       }
 
       if (
-        layerMode &&
+      layerMode &&
         (productId === 'investments-move' ||
           productId === 'link-update-mode' ||
           productId === 'link-upgrade-mode')
@@ -416,7 +449,7 @@ export default function Home() {
       }
       return { disabled: false as const };
     },
-    [effectiveWebhookConfigUrl, layerMode, useLegacyUserToken]
+    [effectiveWebhookConfigUrl, layerFlowEnabled, layerMode, useLegacyUserToken]
   );
 
   // Build the Configuration Wizard's card-and-pills structure from the
@@ -436,7 +469,7 @@ export default function Home() {
       return {
         id: leaf.id,
         label: leaf.shortName || leaf.name,
-        selected: !!demoProductsVisibility[leaf.id],
+        selected: layerFlowEnabled ? false : !!demoProductsVisibility[leaf.id],
         disabled: disableInfo.disabled,
         disabledReason: 'reason' in disableInfo ? disableInfo.reason : undefined,
       };
@@ -492,7 +525,7 @@ export default function Home() {
           bottomPills,
         };
       });
-  }, [demoProductsVisibility, getProductDisableInfo]);
+  }, [demoProductsVisibility, getProductDisableInfo, layerFlowEnabled]);
 
   // Filter the wizard cards down to just the leaves the user enabled
   // pre-Link. Used in `pick` mode after Link is completed. Upgrade Mode
@@ -678,11 +711,33 @@ export default function Home() {
     handleDemoModeApiCall(leafId);
   };
 
-  const createLayerSessionToken = useCallback(
-    async (targetProductId: string, userForSession: { client_user_id: string; user_id: string }) => {
-      const cfg = getProductConfigById(targetProductId);
-      if (!cfg) return;
+  const buildLayerSessionTokenConfig = (userForSession: { client_user_id: string; user_id?: string }) => {
+    const config: Record<string, unknown> = {
+      template_id: useAltCredentials ? ALT_LAYER_TEMPLATE_ID : DEFAULT_LAYER_TEMPLATE_ID,
+      user: { client_user_id: userForSession.client_user_id },
+    };
+    if (userForSession.user_id) {
+      config.user_id = userForSession.user_id;
+    }
+    if (effectiveWebhookConfigUrl) {
+      config.webhook = effectiveWebhookConfigUrl;
+    }
+    return config;
+  };
 
+  const showSessionTokenPreview = (config: Record<string, unknown>) => {
+    const displayConfig = stripSessionTokenCredentials(config);
+    setSessionTokenConfig(displayConfig);
+    setEditedSessionTokenConfig(JSON.stringify(displayConfig, null, 2));
+    setIsEditingSessionTokenConfig(false);
+    setSessionTokenConfigError(null);
+    setModalState('preview-session-token');
+    setShowModal(true);
+    setShowWelcome(false);
+  };
+
+  const createLayerSessionToken = useCallback(
+    async (configToUse: any) => {
       try {
         setLayerSessionActive(true);
         setLayerPhoneSubmitConfig({ phone_number: DEFAULT_LAYER_PHONE_NUMBER });
@@ -694,36 +749,23 @@ export default function Home() {
         setIsEditingLayerDobSubmitConfig(false);
         setEditedLayerDobSubmitConfig(JSON.stringify({ date_of_birth: DEFAULT_LAYER_DATE_OF_BIRTH }, null, 2));
         setLayerDobSubmitConfigError(null);
-  
+
         setLinkEvents([]);
 
         // Don't show event/webhook side panels until Link is actually opened (LAYER_READY).
         setShowEventLogs(false);
         setEventLogsPosition('right');
-  
 
+        setModalState('layer-creating-session');
         setShowModal(true);
         setShowWelcome(false);
 
-        const template_id = cfg.layerTemplateId || DEFAULT_LAYER_TEMPLATE_ID;
-        const client_user_id = String(userForSession?.client_user_id || '').trim();
-        const user_id = String(userForSession?.user_id || '').trim();
-        if (!client_user_id) {
-          throw new Error('Missing user.client_user_id for Layer session/token/create');
-        }
-        if (!user_id) {
-          throw new Error('Missing user_id for Layer session/token/create');
-        }
+        const bodyToSend = stripSessionTokenCredentials(configToUse) || {};
 
         const resp = await fetch('/api/session-token-create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            template_id,
-            webhook: effectiveWebhookConfigUrl,
-            user: { client_user_id },
-            user_id,
-          }),
+          body: JSON.stringify(bodyToSend),
         });
 
         const json = await resp.json();
@@ -764,7 +806,7 @@ export default function Home() {
         setShowWelcome(false);
       }
     },
-    [effectiveWebhookConfigUrl, useAltCredentials]
+    []
   );
 
   const runNonCraFlowWithAccessToken = useCallback(
@@ -903,10 +945,10 @@ export default function Home() {
         return;
       }
 
-      if (useLegacyUserToken) {
+      if (alwaysUserCreate && useLegacyUserToken) {
         setErrorData({
           error: 'LAYER_LEGACY_UNSUPPORTED',
-          message: 'Layer requires user_id. Disable legacy user_token to continue.',
+          message: 'Layer is not compatible with user_token. Disable legacy user_token to continue.',
           productId,
         });
         setApiStatusCode(400);
@@ -916,11 +958,26 @@ export default function Home() {
         return;
       }
 
-      // Layer always requires a /user/create step so we have a user_id
-      // to pass into /session/token/create as user.user_id.
-      setLayerPendingUserCreate(true);
-      setLayerPendingProductId(productId);
-      showUserCreatePreview(productId);
+      // Layer does not need /user/create (or user_id) unless the user opted
+      // into "Always call /user/create first".
+      if (alwaysUserCreate) {
+        setLayerPendingUserCreate(true);
+        setLayerPendingProductId(productId);
+        showUserCreatePreview(productId);
+      } else {
+        setLayerPendingUserCreate(false);
+        setLayerPendingProductId(productId);
+        setUserId(null);
+        setUserToken(null);
+        const client_user_id = generateClientUserId();
+        setClientUserId(client_user_id);
+        const sessionConfig = buildLayerSessionTokenConfig({ client_user_id });
+        if (zapMode) {
+          createLayerSessionToken(sessionConfig);
+        } else {
+          showSessionTokenPreview(sessionConfig);
+        }
+      }
       return;
     }
 
@@ -1023,23 +1080,23 @@ export default function Home() {
       return;
     }
 
-    // Build the /user/create configuration based on legacy toggle
-    let userConfig: any;
-
-    // Multi-item Link (non-CRA): /user/create only needs client_user_id
-    // Upgrade Mode: include identity (or consumer_report_user_identity) like CRA flows.
-    // Keep CRA behavior unchanged.
     const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig.isCRA;
     const isUpgradeModeUserCreate = productId === 'link-upgrade-mode';
-    
-    if (isNonCraMultiItemUserCreate) {
-      userConfig = {
-        client_user_id: 'multi_item_user_' + Date.now(),
-      };
-    } else if (isUpgradeModeUserCreate && useLegacyUserToken) {
-      userConfig = {
-        client_user_id: 'upgrade_mode_user_' + Date.now(),
-        consumer_report_user_identity: {
+    // identity / consumer_report_user_identity are CRA-only. Non-CRA
+    // /user/create (Always /user/create, Multi-item, Layer) is just client_user_id.
+    const includeCraIdentity = !!(productConfig.isCRA || isUpgradeModeUserCreate);
+
+    const client_user_id = isUpgradeModeUserCreate
+      ? 'upgrade_mode_user_' + Date.now()
+      : isNonCraMultiItemUserCreate
+        ? 'multi_item_user_' + Date.now()
+        : 'flash_user_' + Date.now();
+
+    const userConfig: any = { client_user_id };
+
+    if (includeCraIdentity) {
+      if (useLegacyUserToken) {
+        userConfig.consumer_report_user_identity = {
           first_name: 'Flash',
           last_name: 'User',
           ssn_last_4: '1234',
@@ -1053,12 +1110,9 @@ export default function Home() {
             postal_code: '29601',
             country: 'US',
           },
-        },
-      };
-    } else if (isUpgradeModeUserCreate) {
-      userConfig = {
-        client_user_id: 'upgrade_mode_user_' + Date.now(),
-        identity: {
+        };
+      } else {
+        userConfig.identity = {
           name: {
             given_name: 'Test',
             family_name: 'User',
@@ -1077,67 +1131,14 @@ export default function Home() {
             },
           ],
           id_numbers: [{ value: '1234', type: 'us_ssn_last_4' }],
-        },
-      };
-    } else if (layerMode && productConfig.isCRA && !useLegacyUserToken) {
-      // Layer + CRA (user_id flow): identity will be collected in Layer and persisted later via /user/update.
-      userConfig = {
-        client_user_id: 'flash_user_' + Date.now(),
-      };
-    } else if (useLegacyUserToken) {
-      // Legacy format using consumer_report_user_identity
-      userConfig = {
-        client_user_id: 'flash_user_' + Date.now(),
-        consumer_report_user_identity: {
-          first_name: 'Flash',
-          last_name: 'User',
-          ssn_last_4: '1234',
-          date_of_birth: '1970-01-01',
-          phone_numbers: ['+14155550011'],
-          emails: ['email@example.com'],
-          primary_address: {
-            city: 'Greenville',
-            region: 'SC',
-            street: '650 N Academy St',
-            postal_code: '29601',
-            country: 'US'
-          }
-        }
-      };
-    } else {
-      // New format using identity object
-      userConfig = {
-        client_user_id: 'flash_user_' + Date.now(),
-        identity: {
-          name: {
-            given_name: 'Test',
-            family_name: 'User'
-          },
-          date_of_birth: '1970-01-31',
-          emails: [
-            { data: 'test@email.com', primary: true }
-          ],
-          phone_numbers: [
-            { data: '+14155550011', primary: true }
-          ],
-          addresses: [
-            {
-              street_1: '100 Grey St',
-              city: 'San Francisco',
-              region: 'CA',
-              country: 'US',
-              postal_code: '94109',
-              primary: true
-            }
-          ],
-          id_numbers: [
-            { value: '1234', type: 'us_ssn_last_4' }
-          ]
-        }
-      };
+        };
+      }
     }
 
     setUserCreateConfig(userConfig);
+    setEditedUserCreateConfig('');
+    setIsEditingUserCreateConfig(false);
+    setUserCreateConfigError(null);
     setModalState('preview-user-create');
     setShowModal(true);
   };
@@ -1165,27 +1166,32 @@ export default function Home() {
 
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
-      const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
       const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
-      
+      const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
+      const includeCraIdentity = !!(productConfig?.isCRA || isUpgradeMode);
+
+      const {
+        identity: _identity,
+        consumer_report_user_identity: _consumerReportUserIdentity,
+        useLegacyUserToken: _useLegacyUserToken,
+        ...configWithoutIdentity
+      } = configToUse && typeof configToUse === 'object' ? configToUse : {};
+
+      const userCreateBody = includeCraIdentity
+        ? { ...configToUse, useLegacyUserToken }
+        : {
+            ...configWithoutIdentity,
+            client_user_id:
+              String(configToUse?.client_user_id || '').trim() ||
+              (multiItemLinkEnabled ? 'multi_item_user_' : 'flash_user_') + Date.now(),
+          };
+
       const response = await fetch('/api/user-create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(
-          isNonCraMultiItemUserCreate
-            ? {
-                // Non-CRA Multi-item: only client_user_id is required
-                client_user_id:
-                  String(configToUse?.client_user_id || '').trim() ||
-                  'multi_item_user_' + Date.now(),
-              }
-            : {
-                ...configToUse,
-                useLegacyUserToken,
-              }
-        ),
+        body: JSON.stringify(userCreateBody),
       });
       
       const data = await response.json();
@@ -1326,11 +1332,14 @@ export default function Home() {
         return;
       }
 
-      // Layer legacy mode: continue into /session/token/create by passing user_token under user.user_id
+      // Layer: after optional /user/create, continue into /session/token/create.
+      // user_id is included when Plaid returned a usable identifier; Layer
+      // does not require it.
       if (layerMode && layerPendingUserCreate) {
         const productIdForLayer =
           layerPendingProductId || selectedGrandchildProduct || selectedChildProduct || selectedProduct;
         const clientUserIdForSession = String(configToUse?.client_user_id || userCreateConfig?.client_user_id || '').trim();
+        const sessionUserId = plaidUserIdForSessionToken(data);
 
         setLayerPendingUserCreate(false);
         setLayerPendingProductId(null);
@@ -1345,19 +1354,20 @@ export default function Home() {
             setShowModal(true);
             return;
           }
-          if (!newUserId) {
-            setErrorData({
-              error: 'LAYER_MISSING_USER_ID',
-              message: 'Plaid did not return a user_id from /user/create. Layer requires user_id.',
-              response: data,
-            });
-            setApiStatusCode(502);
-            setModalState('api-error');
-            setShowModal(true);
-            return;
+
+          if (sessionUserId) {
+            setUserId(sessionUserId);
           }
 
-          await createLayerSessionToken(productIdForLayer, { client_user_id: clientUserIdForSession, user_id: newUserId });
+          const sessionConfig = buildLayerSessionTokenConfig({
+            client_user_id: clientUserIdForSession,
+            ...(sessionUserId ? { user_id: sessionUserId } : {}),
+          });
+          if (zapMode) {
+            await createLayerSessionToken(sessionConfig);
+          } else {
+            showSessionTokenPreview(sessionConfig);
+          }
         } else {
           setErrorData({
             error: 'LAYER_MISSING_PRODUCT',
@@ -1524,6 +1534,71 @@ export default function Home() {
     setModalState('preview-user-create');
     setIsEditingConfig(false);
     setConfigError(null);
+    setIsEditingSessionTokenConfig(false);
+    setSessionTokenConfigError(null);
+  };
+
+  const handleToggleSessionTokenEditMode = () => {
+    if (!isEditingSessionTokenConfig) {
+      setEditedSessionTokenConfig(JSON.stringify(stripSessionTokenCredentials(sessionTokenConfig), null, 2));
+      setSessionTokenConfigError(null);
+    }
+    setIsEditingSessionTokenConfig(!isEditingSessionTokenConfig);
+  };
+
+  const handleCancelSessionTokenEdit = () => {
+    setIsEditingSessionTokenConfig(false);
+    setSessionTokenConfigError(null);
+    setEditedSessionTokenConfig(sessionTokenConfig ? JSON.stringify(stripSessionTokenCredentials(sessionTokenConfig), null, 2) : '');
+  };
+
+  const handleProceedWithSessionToken = async (configOverride?: any) => {
+    let configToUse = configOverride;
+    if (configToUse == null && editedSessionTokenConfig.trim()) {
+      try {
+        configToUse = JSON.parse(editedSessionTokenConfig);
+      } catch {
+        setSessionTokenConfigError('Invalid JSON: configuration must be an object');
+        setIsEditingSessionTokenConfig(true);
+        return;
+      }
+    }
+    if (configToUse == null) {
+      configToUse = sessionTokenConfig;
+    }
+    if (!configToUse || typeof configToUse !== 'object' || Array.isArray(configToUse)) {
+      setSessionTokenConfigError('Invalid JSON: configuration must be an object');
+      setEditedSessionTokenConfig(typeof editedSessionTokenConfig === 'string' ? editedSessionTokenConfig : JSON.stringify(configToUse, null, 2));
+      setIsEditingSessionTokenConfig(true);
+      setModalState('preview-session-token');
+      setShowModal(true);
+      return;
+    }
+
+    const sanitized = stripSessionTokenCredentials(configToUse);
+    setSessionTokenConfig(sanitized);
+    setEditedSessionTokenConfig(JSON.stringify(sanitized, null, 2));
+    setSessionTokenConfigError(null);
+    setIsEditingSessionTokenConfig(false);
+    await createLayerSessionToken(sanitized);
+  };
+
+  const handleSaveAndProceedSessionToken = async () => {
+    try {
+      const parsed = JSON.parse(editedSessionTokenConfig);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setSessionTokenConfigError('Invalid JSON: configuration must be an object');
+        return;
+      }
+      const sanitized = stripSessionTokenCredentials(parsed);
+      setSessionTokenConfig(sanitized);
+      setEditedSessionTokenConfig(JSON.stringify(sanitized, null, 2));
+      setSessionTokenConfigError(null);
+      setIsEditingSessionTokenConfig(false);
+      await createLayerSessionToken(sanitized);
+    } catch (error: any) {
+      setSessionTokenConfigError(`Invalid JSON: ${error.message}`);
+    }
   };
 
   const handleToggleUserCreateEditMode = () => {
@@ -1945,6 +2020,10 @@ export default function Home() {
     // Cancel any in-progress Layer setup
     setLayerPendingUserCreate(false);
     setLayerPendingProductId(null);
+    setSessionTokenConfig(null);
+    setIsEditingSessionTokenConfig(false);
+    setEditedSessionTokenConfig('');
+    setSessionTokenConfigError(null);
     
     // Reset demo mode starting flag if it was set
     if (isDemoModeStarting) {
@@ -2399,7 +2478,7 @@ export default function Home() {
     setApiStatusCode(200);
     const previous = lastStableModalStateRef.current;
     const validStableStates: typeof modalState[] = [
-      'preview-user-create', 'preview-user-update', 'preview-config', 'preview-sandbox-config', 'preview-product-api',
+      'preview-user-create', 'preview-user-update', 'preview-session-token', 'preview-config', 'preview-sandbox-config', 'preview-product-api',
       'callback-success', 'callback-exit', 'callback-exit-zap', 'accounts-data', 'update-mode-input',
       'upgrade-mode-pick-product', 'hybrid-step', 'cashflow-updates-pick-item', 'cashflow-updates-webhooks',
       'success', 'error', 'zap-mode-results', 'layer-phone-submit', 'layer-waiting-eligibility', 'layer-dob-submit',
@@ -2467,7 +2546,7 @@ export default function Home() {
     setTempMultiItemLinkEnabled(multiItemLinkEnabled);
     setTempHostedLinkEnabled(hostedLinkEnabled);
     setTempAutoRemoveEnabled(autoRemoveEnabled);
-    setTempUseLegacyUserToken(useLegacyUserToken);
+    setTempUseLegacyUserToken(layerMode && alwaysUserCreate ? false : useLegacyUserToken);
     setTempUseAltCredentials(useAltCredentials);
     setTempIncludePhoneNumber(includePhoneNumber);
     setTempAlwaysUserCreate(alwaysUserCreate);
@@ -2493,7 +2572,7 @@ export default function Home() {
     setMultiItemLinkEnabled(tempMultiItemLinkEnabled);
     setHostedLinkEnabled(tempHostedLinkEnabled);
     setAutoRemoveEnabled(tempAutoRemoveEnabled);
-    setUseLegacyUserToken(tempUseLegacyUserToken);
+    setUseLegacyUserToken(tempLayerMode && tempAlwaysUserCreate ? false : tempUseLegacyUserToken);
     // Persist Plaid credential mode (cookie-backed)
     try {
       const resp = await fetch('/api/credentials-mode', {
@@ -2530,9 +2609,18 @@ export default function Home() {
       // Ignore storage errors (privacy mode, etc.)
     }
     
-    // Close settings modal and restore the wizard
+    // Close settings. Layer (or Layer Identity Match) skips the product
+    // wizard and starts the Layer session immediately — products are unused.
+    const shouldStartLayer = tempLayerMode || tempLayerIdentityMatchEnabled;
     setShowSettingsModal(false);
-    setShowProductModal(true);
+    if (shouldStartLayer) {
+      setShowProductModal(false);
+      setShowWelcome(false);
+      pendingLayerStartRef.current = true;
+      setPendingLayerStart(true);
+    } else {
+      setShowProductModal(true);
+    }
   };
 
   const handleToggleZap = () => {
@@ -2546,7 +2634,12 @@ export default function Home() {
   };
 
   const handleToggleAlwaysUserCreate = () => {
-    setTempAlwaysUserCreate(!tempAlwaysUserCreate);
+    const next = !tempAlwaysUserCreate;
+    setTempAlwaysUserCreate(next);
+    // Layer + /user/create cannot send a user_token into /session/token/create.
+    if (next && tempLayerMode) {
+      setTempUseLegacyUserToken(false);
+    }
   };
 
   const handleToggleIncludePhoneNumber = () => {
@@ -2558,14 +2651,15 @@ export default function Home() {
     setTempLayerMode(next);
 
     // Layer is incompatible with several Link modes. If enabling Layer, turn those off.
-    // Layer also requires the ALT client ID.
     if (next) {
       setTempEmbeddedMode(false);
       setTempHostedLinkEnabled(false);
       setTempMultiItemLinkEnabled(false);
       setTempBypassLink(false);
       setTempUpdateModeEnabled(false);
-      setTempUseAltCredentials(true);
+      if (tempAlwaysUserCreate) {
+        setTempUseLegacyUserToken(false);
+      }
     } else {
       // Turning Layer off: also turn off Layer-only subfeatures.
       setTempLayerIdentityMatchEnabled(false);
@@ -2649,6 +2743,7 @@ export default function Home() {
   // entirely and launch their dedicated preview-product-api flow on click,
   // rather than entering the multi-product selection set.
   const handleToggleWizardLeaf = (leafId: string) => {
+    if (layerFlowEnabled) return;
     const cfg = getProductConfigById(leafId);
     if (cfg?.noAccessToken) {
       handleStartNoAccessTokenLeaf(leafId);
@@ -2697,6 +2792,17 @@ export default function Home() {
     }
     handleDemoModeStart();
   };
+
+  useEffect(() => {
+    if (!pendingLayerStart) return;
+    if (!pendingLayerStartRef.current) return;
+    pendingLayerStartRef.current = false;
+    setPendingLayerStart(false);
+    handleWizardStart();
+    // Only fire when Settings Save requests a Layer start, after Layer
+    // settings (credentials, webhook, always-user-create) have committed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLayerStart]);
 
   const handleZapModeSuccess = useCallback(async (public_token: string, metadata: any) => {
     // Zap Mode: skip callback modal, go straight to API calls
@@ -3310,7 +3416,7 @@ export default function Home() {
           if (useLegacyUserToken) {
             setErrorData({
               error: 'LAYER_CRA_LEGACY_UNSUPPORTED',
-              message: 'Layer + CRA requires user_id. Disable legacy user_token to continue.',
+              message: 'Layer is not compatible with legacy user_token for CRA products. Disable it to continue.',
             });
             setApiStatusCode(400);
             setModalState('api-error');
@@ -4143,6 +4249,10 @@ export default function Home() {
     setLayerSessionActive(false);
     setLayerPendingUserCreate(false);
     setLayerPendingProductId(null);
+    setSessionTokenConfig(null);
+    setIsEditingSessionTokenConfig(false);
+    setEditedSessionTokenConfig('');
+    setSessionTokenConfigError(null);
     setLayerPhoneSubmitConfig({ phone_number: DEFAULT_LAYER_PHONE_NUMBER });
     setIsEditingLayerPhoneSubmitConfig(false);
     setEditedLayerPhoneSubmitConfig(JSON.stringify({ phone_number: DEFAULT_LAYER_PHONE_NUMBER }, null, 2));
@@ -4496,20 +4606,10 @@ export default function Home() {
   }, []);
 
   const handleDemoModeStart = async () => {
-    // Upgrade Mode owns its own dedicated end-to-end flow (showLinkConfigPreview
-    // already handles /user/create, the upgrade-link cfg build, and post-Link
-    // routing through the upgrade-mode-pick-product modal). When the user has
-    // it toggled on in the wizard, hand off to that flow and ignore any other
-    // selections — Upgrade Mode is its own branch.
-    if (demoProductsVisibility['link-upgrade-mode']) {
-      showLinkConfigPreview('link-upgrade-mode');
-      return;
-    }
-
-    // Layer owns its own entry path (/user/create → /session/token/create →
-    // phone/DOB submit → Link). Do not build a /link/token/create config
-    // while Layer is on — that would skip the Layer session entirely.
-    if (layerMode) {
+    // Layer owns its own entry path (/session/token/create → phone/DOB
+    // submit → Link). Products are not sent on Layer requests, so ignore
+    // any leftover wizard selections (including Upgrade Mode).
+    if (layerMode || layerIdentityMatchEnabled) {
       if (!effectiveWebhookConfigUrl) {
         setErrorData({
           error: 'WEBHOOK_URL_REQUIRED',
@@ -4522,10 +4622,10 @@ export default function Home() {
         return;
       }
 
-      if (useLegacyUserToken) {
+      if (alwaysUserCreate && useLegacyUserToken) {
         setErrorData({
           error: 'LAYER_LEGACY_UNSUPPORTED',
-          message: 'Layer requires user_id. Disable legacy user_token to continue.',
+          message: 'Layer is not compatible with user_token. Disable legacy user_token to continue.',
         });
         setApiStatusCode(400);
         setModalState('api-error');
@@ -4534,32 +4634,39 @@ export default function Home() {
         return;
       }
 
-      const { selectedLeafConfigs } = resolveSelectedLinkProducts();
-      if (selectedLeafConfigs.length === 0) {
-        setErrorData({
-          error: 'LAYER_NO_PRODUCTS_SELECTED',
-          message: 'Select at least one product before starting Layer.',
-        });
-        setApiStatusCode(400);
-        setModalState('api-error');
-        setShowModal(true);
-        setShowWelcome(false);
-        return;
-      }
-
-      // Prefer a leaf with an explicit Layer template (CRA template when CRA
-      // is selected); otherwise fall back to the first selected leaf and let
-      // createLayerSessionToken use DEFAULT_LAYER_TEMPLATE_ID.
-      const leafForLayer =
-        selectedLeafConfigs.find((c) => c.isCRA && c.layerTemplateId) ||
-        selectedLeafConfigs.find((c) => c.layerTemplateId) ||
-        selectedLeafConfigs[0];
-      const productIdForLayer = leafForLayer.id;
+      // Product selection is unused for Layer. Keep a non-CRA leaf only as
+      // internal context for optional /user/create (no identity objects).
+      const productIdForLayer = 'auth';
 
       setSelectionForLeaf(productIdForLayer);
-      setLayerPendingUserCreate(true);
-      setLayerPendingProductId(productIdForLayer);
-      showUserCreatePreview(productIdForLayer);
+      if (alwaysUserCreate) {
+        setLayerPendingUserCreate(true);
+        setLayerPendingProductId(productIdForLayer);
+        showUserCreatePreview(productIdForLayer);
+      } else {
+        setLayerPendingUserCreate(false);
+        setLayerPendingProductId(productIdForLayer);
+        setUserId(null);
+        setUserToken(null);
+        const client_user_id = generateClientUserId();
+        setClientUserId(client_user_id);
+        const sessionConfig = buildLayerSessionTokenConfig({ client_user_id });
+        if (zapMode) {
+          createLayerSessionToken(sessionConfig);
+        } else {
+          showSessionTokenPreview(sessionConfig);
+        }
+      }
+      return;
+    }
+
+    // Upgrade Mode owns its own dedicated end-to-end flow (showLinkConfigPreview
+    // already handles /user/create, the upgrade-link cfg build, and post-Link
+    // routing through the upgrade-mode-pick-product modal). When the user has
+    // it toggled on in the wizard, hand off to that flow and ignore any other
+    // selections — Upgrade Mode is its own branch.
+    if (demoProductsVisibility['link-upgrade-mode']) {
+      showLinkConfigPreview('link-upgrade-mode');
       return;
     }
 
@@ -4951,6 +5058,10 @@ export default function Home() {
     setLayerSessionActive(false);
     setLayerPendingUserCreate(false);
     setLayerPendingProductId(null);
+    setSessionTokenConfig(null);
+    setIsEditingSessionTokenConfig(false);
+    setEditedSessionTokenConfig('');
+    setSessionTokenConfigError(null);
     setLayerDateOfBirth(DEFAULT_LAYER_DATE_OF_BIRTH);
     setLayerIdentityMatchData(null);
 
@@ -6345,6 +6456,77 @@ export default function Home() {
       );
     }
 
+    if (modalState === 'layer-creating-session') {
+      return (
+        <LoadingModalBody message="Creating Layer session..." />
+      );
+    }
+
+    if (modalState === 'preview-session-token' && sessionTokenConfig) {
+      const displayConfig = stripSessionTokenCredentials(sessionTokenConfig);
+      const sessionTokenFollowsUserCreate = alwaysUserCreate;
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>{sessionTokenFollowsUserCreate ? 'Step 2: ' : ''}Here&apos;s the /session/token/create configuration that will be used:</h2>
+          </div>
+          {!isEditingSessionTokenConfig ? (
+            <>
+              <div className="account-data config-data-with-edit">
+                <button
+                  className="config-edit-button"
+                  onClick={handleToggleSessionTokenEditMode}
+                  title="Edit configuration"
+                >
+                  <EditPencilIcon />
+                </button>
+                <JsonHighlight data={displayConfig} />
+              </div>
+              {sessionTokenConfigError && <div className="config-error">{sessionTokenConfigError}</div>}
+              <div className="modal-button-row two-buttons">
+                <ArrowButton
+                  variant="red"
+                  direction="back"
+                  onClick={sessionTokenFollowsUserCreate ? handleGoBackToUserCreate : handleGoBackToProducts}
+                />
+                <ArrowButton variant="blue" onClick={() => handleProceedWithSessionToken()} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="code-editor-container">
+                <CodeEditor
+                  value={editedSessionTokenConfig}
+                  language="json"
+                  onChange={(e) => setEditedSessionTokenConfig(e.target.value)}
+                  padding={15}
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 13,
+                    fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                    backgroundColor: 'var(--surface-code)',
+                    borderRadius: '12px',
+                    minHeight: '400px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                  }}
+                />
+                {sessionTokenConfigError && (
+                  <div className="config-error">
+                    {sessionTokenConfigError}
+                  </div>
+                )}
+              </div>
+              <div className="modal-button-row two-buttons">
+                <ArrowButton variant="red" direction="back" onClick={handleCancelSessionTokenEdit} />
+                <ArrowButton variant="blue" onClick={handleSaveAndProceedSessionToken} />
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
     if (modalState === 'preview-config' && linkTokenConfig) {
       // Check if this is a CRA product to modify the back button behavior
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
@@ -7261,7 +7443,7 @@ export default function Home() {
             subtitle=""
             onPillClick={handleToggleWizardLeaf}
             onContinue={handleWizardStart}
-            continueDisabled={!hasAnyEnabledLeaf}
+            continueDisabled={layerFlowEnabled ? false : !hasAnyEnabledLeaf}
             continueLabel="Start"
             onSettingsClick={handleOpenSettings}
             hasCustomSettings={hasCustomSettings}
@@ -7481,13 +7663,18 @@ export default function Home() {
                       label="Use ALT_PLAID_CLIENT_ID"
                       checked={tempUseAltCredentials}
                       onChange={handleToggleAltCredentials}
-                      disabled={!altCredentialsAvailable || tempLayerMode}
-                      tooltip={tempLayerMode ? 'Layer requires the ALT Client ID' : undefined}
+                      disabled={!altCredentialsAvailable}
                     />
                     <SettingsPill
                       label="Use legacy user_token"
-                      checked={tempUseLegacyUserToken}
+                      checked={tempLayerMode && tempAlwaysUserCreate ? false : tempUseLegacyUserToken}
                       onChange={handleToggleLegacyUserToken}
+                      disabled={tempLayerMode && tempAlwaysUserCreate}
+                      tooltip={
+                        tempLayerMode && tempAlwaysUserCreate
+                          ? 'Layer is not compatible with user_token'
+                          : undefined
+                      }
                     />
                     <SettingsPill
                       label="Auto-remove items & users"
