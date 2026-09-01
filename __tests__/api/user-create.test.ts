@@ -66,6 +66,48 @@ describe('POST /api/user-create', () => {
     expect(body.identity).toEqual({ first_name: 'Jane', last_name: 'Doe' });
   });
 
+  it('forwards the full CRA identity object to Plaid', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ user_id: 'user_abc123' }),
+    });
+
+    const identity = {
+      name: { given_name: 'Test', family_name: 'User' },
+      date_of_birth: '1970-01-31',
+      emails: [{ data: 'test@email.com', primary: true }],
+      phone_numbers: [{ data: '+14155550011', primary: true }],
+      addresses: [
+        {
+          street_1: '100 Grey St',
+          city: 'San Francisco',
+          region: 'CA',
+          country: 'US',
+          postal_code: '94109',
+          primary: true,
+        },
+      ],
+      id_numbers: [{ value: '1234', type: 'us_ssn_last_4' }],
+    };
+
+    await POST(
+      createRequest({
+        client_user_id: 'flash_user_1',
+        identity,
+      })
+    );
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.identity).toEqual(identity);
+    expect(body.identity.name).toEqual({ given_name: 'Test', family_name: 'User' });
+    expect(body.identity.date_of_birth).toBe('1970-01-31');
+    expect(body.identity.emails).toEqual([{ data: 'test@email.com', primary: true }]);
+    expect(body.identity.phone_numbers).toEqual([{ data: '+14155550011', primary: true }]);
+    expect(body.identity.addresses[0].street_1).toBe('100 Grey St');
+    expect(body.identity.id_numbers).toEqual([{ value: '1234', type: 'us_ssn_last_4' }]);
+  });
+
   it('creates a user with legacy consumer_report_user_identity', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

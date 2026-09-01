@@ -929,6 +929,14 @@ body {
   transform: translateY(0);
 }
 
+.action-button:disabled,
+.action-button:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .button-blue {
   background: linear-gradient(135deg, #3b8fd1 0%, #00b8c4 100%);
 }

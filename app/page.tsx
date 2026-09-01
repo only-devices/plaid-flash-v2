@@ -14,6 +14,12 @@ import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
+import { parseHostedLinkPublicTokens } from '@/lib/hostedLinkPublicTokens';
+import {
+  applyUserCreateIdentityToPayload,
+  buildUserCreateConfig,
+  ensureIdentityFields,
+} from '@/lib/userCreateIdentity';
 
 const WEBHOOK_URL_OVERRIDE_STORAGE_KEY = 'plaid_flash_webhook_url';
 const THEME_STORAGE_KEY = 'plaid_flash_theme';
@@ -312,6 +318,7 @@ export default function Home() {
   const [hostedLinkManualPayload, setHostedLinkManualPayload] = useState<string>('');
   const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
   const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
+  const [hostedLinkTokenCopied, setHostedLinkTokenCopied] = useState(false);
   const hostedLinkPopupRef = useRef<Window | null>(null);
 
   // Reset all 5 hosted-link UI fields. Called from start-over paths and from
@@ -323,6 +330,7 @@ export default function Home() {
     setHostedLinkManualPayload('');
     setHostedLinkManualParseError(null);
     setHostedLinkExtractedPublicTokens([]);
+    setHostedLinkTokenCopied(false);
   };
 
   // Layer state
@@ -1034,7 +1042,7 @@ export default function Home() {
     setClientUserId(generatedClientUserId);
     const fullConfig: any = {
       link_customization_name: 'flash',
-      user: includePhoneNumber 
+      user: includePhoneNumber
         ? { client_user_id: generatedClientUserId, phone_number: '+14155550011' }
         : { client_user_id: generatedClientUserId },
       client_name: 'Plaid Flash',
@@ -1082,8 +1090,8 @@ export default function Home() {
 
     const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig.isCRA;
     const isUpgradeModeUserCreate = productId === 'link-upgrade-mode';
-    // identity / consumer_report_user_identity are CRA-only. Non-CRA
-    // /user/create (Always /user/create, Multi-item, Layer) is just client_user_id.
+    // identity / consumer_report_user_identity are CRA-only (Upgrade Mode
+    // uses CRA products). Non-CRA /user/create is just client_user_id.
     const includeCraIdentity = !!(productConfig.isCRA || isUpgradeModeUserCreate);
 
     const client_user_id = isUpgradeModeUserCreate
@@ -1092,48 +1100,11 @@ export default function Home() {
         ? 'multi_item_user_' + Date.now()
         : 'flash_user_' + Date.now();
 
-    const userConfig: any = { client_user_id };
-
-    if (includeCraIdentity) {
-      if (useLegacyUserToken) {
-        userConfig.consumer_report_user_identity = {
-          first_name: 'Flash',
-          last_name: 'User',
-          ssn_last_4: '1234',
-          date_of_birth: '1970-01-01',
-          phone_numbers: ['+14155550011'],
-          emails: ['email@example.com'],
-          primary_address: {
-            city: 'Greenville',
-            region: 'SC',
-            street: '650 N Academy St',
-            postal_code: '29601',
-            country: 'US',
-          },
-        };
-      } else {
-        userConfig.identity = {
-          name: {
-            given_name: 'Test',
-            family_name: 'User',
-          },
-          date_of_birth: '1970-01-31',
-          emails: [{ data: 'test@email.com', primary: true }],
-          phone_numbers: [{ data: '+14155550011', primary: true }],
-          addresses: [
-            {
-              street_1: '100 Grey St',
-              city: 'San Francisco',
-              region: 'CA',
-              country: 'US',
-              postal_code: '94109',
-              primary: true,
-            },
-          ],
-          id_numbers: [{ value: '1234', type: 'us_ssn_last_4' }],
-        };
-      }
-    }
+    const userConfig = buildUserCreateConfig({
+      client_user_id,
+      useLegacyUserToken,
+      includeCraIdentity,
+    });
 
     setUserCreateConfig(userConfig);
     setEditedUserCreateConfig('');
@@ -1168,23 +1139,22 @@ export default function Home() {
       const productConfig = getProductConfigById(effectiveProductId!);
       const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
       const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
-      const includeCraIdentity = !!(productConfig?.isCRA || isUpgradeMode);
 
-      const {
-        identity: _identity,
-        consumer_report_user_identity: _consumerReportUserIdentity,
-        useLegacyUserToken: _useLegacyUserToken,
-        ...configWithoutIdentity
-      } = configToUse && typeof configToUse === 'object' ? configToUse : {};
+      // Submit the modal JSON as-is. Do not strip identity based on the
+      // currently selected product — Demo Mode often has selectedProduct
+      // unset even when the modal was built for a CRA leaf (e.g. Base Report).
+      // Complete required CRA fields only when those objects are already present.
+      const submittedConfig = applyUserCreateIdentityToPayload(
+        configToUse && typeof configToUse === 'object' ? configToUse : {}
+      );
+      if (!String(submittedConfig.client_user_id || '').trim()) {
+        submittedConfig.client_user_id =
+          (multiItemLinkEnabled ? 'multi_item_user_' : 'flash_user_') + Date.now();
+      }
+      setUserCreateConfig(submittedConfig);
+      configToUse = submittedConfig;
 
-      const userCreateBody = includeCraIdentity
-        ? { ...configToUse, useLegacyUserToken }
-        : {
-            ...configWithoutIdentity,
-            client_user_id:
-              String(configToUse?.client_user_id || '').trim() ||
-              (multiItemLinkEnabled ? 'multi_item_user_' : 'flash_user_') + Date.now(),
-          };
+      const userCreateBody = { ...submittedConfig, useLegacyUserToken };
 
       const response = await fetch('/api/user-create', {
         method: 'POST',
@@ -1713,11 +1683,26 @@ export default function Home() {
       // added) and only override user_id with the pending Layer context.
       const { useAltCredentials: _useAltCredentials, ...userUpdateBody } =
         configToUse && typeof configToUse === 'object' ? configToUse : {};
+      const identityPayload = applyUserCreateIdentityToPayload({
+        ...userUpdateBody,
+        ...(userUpdateBody.identity || userCreateConfig?.identity
+          ? { identity: userUpdateBody.identity || userCreateConfig?.identity }
+          : {}),
+        ...(userUpdateBody.consumer_report_user_identity ||
+        userCreateConfig?.consumer_report_user_identity
+          ? {
+              consumer_report_user_identity:
+                userUpdateBody.consumer_report_user_identity ||
+                userCreateConfig?.consumer_report_user_identity,
+            }
+          : {}),
+      });
       const userUpdateResp = await fetch('/api/user-update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...userUpdateBody,
+          ...identityPayload,
           user_id: pending.userId,
         }),
       });
@@ -2688,22 +2673,15 @@ export default function Home() {
     if (next) setTempUpdateModeEnabled(false);
   };
 
-  const parseHostedLinkSessionFinished = (payloadText: string) => {
-    const parsed = JSON.parse(payloadText);
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Invalid JSON');
+  const copyLinkTokenToClipboard = async (): Promise<boolean> => {
+    if (!linkToken) return false;
+    try {
+      await navigator.clipboard.writeText(linkToken);
+      return true;
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      return false;
     }
-    const webhookType = parsed.webhook_type || parsed.webhookType;
-    const webhookCode = parsed.webhook_code || parsed.webhookCode;
-    if (webhookType !== 'LINK' || webhookCode !== 'SESSION_FINISHED') {
-      throw new Error('Expected a LINK/SESSION_FINISHED payload');
-    }
-    const tokens: string[] = Array.isArray(parsed.public_tokens)
-      ? parsed.public_tokens
-      : parsed.public_token
-        ? [parsed.public_token]
-        : [];
-    return tokens.filter((t) => typeof t === 'string' && t.length > 0);
   };
 
   const handleToggleAutoRemove = () => {
@@ -3531,13 +3509,14 @@ export default function Home() {
           };
           const address = Object.keys(addressBase).length > 0 ? { ...addressBase, primary: true } : null;
 
-          const identityUpdate: any = {
+          const identityUpdate: any = ensureIdentityFields({
+            ...(userCreateConfig?.identity || {}),
             ...(given_name || family_name ? { name: { ...(given_name ? { given_name } : {}), ...(family_name ? { family_name } : {}) } } : {}),
             ...(date_of_birth ? { date_of_birth } : {}),
             emails: [{ data: emailForUpdate, primary: true }],
             ...(phoneVal ? { phone_numbers: [{ data: phoneVal, primary: true }] } : {}),
             ...(address ? { addresses: [address] } : {}),
-          };
+          });
 
           const productsToCreate = Array.isArray(productConfig.products)
             ? productConfig.products.filter((p) => p !== 'cra_base_report')
@@ -4733,6 +4712,7 @@ export default function Home() {
         setDemoPendingSandboxConfig(sandboxFullConfig);
         const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
         const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
+        setSelectionForLeaf(productIdForUserCreate);
         showUserCreatePreview(productIdForUserCreate);
         return;
       }
@@ -4788,6 +4768,7 @@ export default function Home() {
       // /user/create first so we can include user_id/user_token in /link/token/create
       const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
       const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
+      setSelectionForLeaf(productIdForUserCreate);
       setDemoPendingSandboxConfig(null);
       setDemoPendingLinkTokenConfig(demoConfig);
       showUserCreatePreview(productIdForUserCreate);
@@ -6910,8 +6891,8 @@ export default function Home() {
             <h2>Hosted Link</h2>
           </div>
 
-          {hostedLinkUrl && (
-            <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {hostedLinkUrl && (
               <button
                 className="action-button button-blue"
                 onClick={() => {
@@ -6924,12 +6905,24 @@ export default function Home() {
               >
                 Open Hosted Link
               </button>
-            </div>
-          )}
+            )}
+            <button
+              className="action-button button-gray"
+              disabled={!linkToken}
+              onClick={async () => {
+                const copied = await copyLinkTokenToClipboard();
+                if (!copied) return;
+                setHostedLinkTokenCopied(true);
+                setTimeout(() => setHostedLinkTokenCopied(false), 1500);
+              }}
+            >
+              {hostedLinkTokenCopied ? 'Copied' : 'Copy Link Token'}
+            </button>
+          </div>
 
           <div className="account-data">
             <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
-              Paste the full <code>SESSION_FINISHED</code> webhook JSON payload below.
+              Paste the public_token(s) you want to exchange below
             </p>
             <textarea
               value={hostedLinkManualPayload}
@@ -6942,7 +6935,7 @@ export default function Home() {
                   return;
                 }
                 try {
-                  const tokens = parseHostedLinkSessionFinished(text);
+                  const tokens = parseHostedLinkPublicTokens(text);
                   setHostedLinkExtractedPublicTokens(tokens);
                   setHostedLinkManualParseError(null);
                 } catch (err: any) {
@@ -6963,7 +6956,7 @@ export default function Home() {
                 fontSize: 12,
                 resize: 'vertical',
               }}
-              placeholder={'{\n  "webhook_type": "LINK",\n  "webhook_code": "SESSION_FINISHED",\n  "public_tokens": ["public-..."]\n}'}
+              placeholder={'public-sandbox-...\n\nor\n\n{\n  "public_tokens": ["public-sandbox-...", "public-sandbox-..."]\n}'}
             />
             {hostedLinkManualParseError && (
               <div className="config-error" style={{ marginTop: 10 }}>
@@ -7768,7 +7761,8 @@ export default function Home() {
                       className="expandable-pill-button"
                       onClick={async () => {
                         try {
-                          await navigator.clipboard.writeText(linkToken);
+                          const copied = await copyLinkTokenToClipboard();
+                          if (!copied) return;
                           setEventLogsCopied(true);
                           setEventLogsSliding(true);
                           setTimeout(() => {
