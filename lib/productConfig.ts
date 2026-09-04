@@ -3,14 +3,14 @@ const getDateRange = () => {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 30);
-  
+
   const formatDate = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
-  
+
   return {
     start_date: formatDate(startDate),
     end_date: formatDate(endDate)
@@ -456,9 +456,13 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             },
             additionalLinkParams: {
               consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
-              gse_options: {
-                report_types: 'VOA',
-              },
+              cra_options: {
+                base_report: {
+                  gse_options: {
+                    report_types: ['VOA']
+                  }
+                }
+              }
             },
             requiresWebhook: true,
             layerTemplateId: 'template_jbeu3j65l0z7',
