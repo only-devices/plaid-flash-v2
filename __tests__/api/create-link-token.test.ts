@@ -137,6 +137,29 @@ describe('POST /api/create-link-token', () => {
     expect(body.user.client_user_id).toBe('my-client-user');
   });
 
+  it('forwards hosted_link with an update-mode access_token', async () => {
+    mockPlaidSuccess({
+      link_token: 'link-token',
+      hosted_link_url: 'https://hosted.plaid.com/link/update',
+    });
+
+    const req = createRequest({
+      access_token: 'access-sandbox-123',
+      products: ['transactions'],
+      hosted_link: {},
+      webhook: 'https://example.com/webhook',
+    });
+    const res = await POST(req);
+    const data = await res.json();
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.access_token).toBe('access-sandbox-123');
+    expect(body.products).toEqual(['transactions']);
+    expect(body.hosted_link).toEqual({});
+    expect(body.webhook).toBe('https://example.com/webhook');
+    expect(data.hosted_link_url).toBe('https://hosted.plaid.com/link/update');
+  });
+
   it('handles update mode with access_token', async () => {
     mockPlaidSuccess({ link_token: 'link-token' });
 

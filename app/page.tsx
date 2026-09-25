@@ -14,7 +14,7 @@ import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
 import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
-import { parseHostedLinkPublicTokens } from '@/lib/hostedLinkPublicTokens';
+import { extractPublicTokensFromLinkTokenGet } from '@/lib/linkTokenGetPublicTokens';
 import {
   applyUserCreateIdentityToPayload,
   buildUserCreateConfig,
@@ -200,7 +200,9 @@ export default function Home() {
   // Update Mode (Settings → Link card). When enabled, clicking "Start" in
   // the wizard routes through the update-mode-input modal first, then opens
   // Link in update mode using the user-provided access_token plus the
-  // selected products' Link config.
+  // selected products' Link config. Hosted Link can be on at the same time:
+  // the LTC body still includes hosted_link, and after create we open that
+  // URL and read public tokens from /link/token/get.
   const [updateModeEnabled, setUpdateModeEnabled] = useState(false);
   const [tempUpdateModeEnabled, setTempUpdateModeEnabled] = useState(false);
   // Set by Settings Save when Layer (or Layer Identity Match) is on so the
@@ -315,21 +317,17 @@ export default function Home() {
   // Hosted Link state
   const [hostedLinkActive, setHostedLinkActive] = useState(false);
   const [hostedLinkUrl, setHostedLinkUrl] = useState<string | null>(null);
-  const [hostedLinkManualPayload, setHostedLinkManualPayload] = useState<string>('');
-  const [hostedLinkManualParseError, setHostedLinkManualParseError] = useState<string | null>(null);
-  const [hostedLinkExtractedPublicTokens, setHostedLinkExtractedPublicTokens] = useState<string[]>([]);
+  const [hostedLinkFetchError, setHostedLinkFetchError] = useState<string | null>(null);
   const [hostedLinkTokenCopied, setHostedLinkTokenCopied] = useState(false);
   const hostedLinkPopupRef = useRef<Window | null>(null);
 
-  // Reset all 5 hosted-link UI fields. Called from start-over paths and from
+  // Reset hosted-link UI fields. Called from start-over paths and from
   // the warm-up / success / failure branches of /link/token/create. Pass
   // `active` and `url` to set the new session state in the same step.
   const resetHostedLinkUi = (opts?: { active?: boolean; url?: string | null }) => {
     setHostedLinkActive(opts?.active ?? false);
     setHostedLinkUrl(opts?.url ?? null);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
-    setHostedLinkExtractedPublicTokens([]);
+    setHostedLinkFetchError(null);
     setHostedLinkTokenCopied(false);
   };
 
@@ -2670,7 +2668,6 @@ export default function Home() {
   const handleToggleHostedLink = () => {
     const next = !tempHostedLinkEnabled;
     setTempHostedLinkEnabled(next);
-    if (next) setTempUpdateModeEnabled(false);
   };
 
   const copyLinkTokenToClipboard = async (): Promise<boolean> => {
@@ -2706,11 +2703,11 @@ export default function Home() {
     const next = !tempUpdateModeEnabled;
     setTempUpdateModeEnabled(next);
     if (next) {
-      // Update Mode is its own Link mode — incompatible with the others.
+      // Update Mode is incompatible with the other Link modes except Hosted
+      // Link, which accepts the same update-mode /link/token/create body.
       setTempLayerMode(false);
       setTempLayerIdentityMatchEnabled(false);
       setTempEmbeddedMode(false);
-      setTempHostedLinkEnabled(false);
       setTempMultiItemLinkEnabled(false);
       setTempBypassLink(false);
     }
@@ -3236,10 +3233,7 @@ export default function Home() {
             return;
           }
 
-          const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
-          const publicTokens: string[] = itemAddResults
-            .map((r: any) => r?.public_token)
-            .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
+          const publicTokens = extractPublicTokensFromLinkTokenGet(data);
 
           if (publicTokens.length === 0) {
             throw new Error('No public_tokens found in /link/token/get response');
@@ -5271,7 +5265,16 @@ export default function Home() {
       // Continue with existing downstream flow (accounts/get -> product flow)
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
+      // Wizard sessions don't select a single product until after Link.
+      // Exchange already happened; hand back to the picker with the new token.
       if (!productConfig) {
+        if (demoMode && !demoLinkCompleted) {
+          setDemoAccessToken(activeAccessToken);
+          setDemoLinkCompleted(true);
+          setShowModal(false);
+          setShowProductModal(true);
+          return;
+        }
         throw new Error('Product configuration not found');
       }
 
@@ -5642,8 +5645,6 @@ export default function Home() {
 
     const requestBody = buildProductRequestBody(baseParams, productConfig);
     setProductApiConfig(requestBody);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
     setModalState('preview-product-api');
     setShowModal(true);
   }, [
@@ -5719,8 +5720,6 @@ export default function Home() {
     setUpgradeModeSelectedProductIndex(0);
     setProductApiTargetProductId(first.id);
     setProductApiConfig(requestBody);
-    setHostedLinkManualPayload('');
-    setHostedLinkManualParseError(null);
     setModalState('preview-product-api');
     setShowModal(true);
   }, [
@@ -6130,7 +6129,10 @@ export default function Home() {
                   }
                 }
 
-                // Respect Hosted Link setting: use Hosted Link if enabled (completion via LINK/SESSION_FINISHED)
+                // Hosted Link + Update Mode share one /link/token/create body:
+                // the update-mode fields above, plus the same hosted_link object
+                // a non-update Hosted session sends. After create, the Hosted
+                // URL opens and the paste modal exchanges public_tokens normally.
                 if (hostedLinkEnabled) {
                   cfg.hosted_link = {};
                   if (effectiveWebhookConfigUrl) {
@@ -6921,68 +6923,25 @@ export default function Home() {
           </div>
 
           <div className="account-data">
-            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
-              Paste the public_token(s) you want to exchange below
+            <p style={{ marginTop: 0, marginBottom: 0, opacity: 0.85 }}>
+              Finish Hosted Link, then continue. Public tokens are read from <code>/link/token/get</code>.
             </p>
-            <textarea
-              value={hostedLinkManualPayload}
-              onChange={(e) => {
-                const text = e.target.value;
-                setHostedLinkManualPayload(text);
-                if (!text.trim()) {
-                  setHostedLinkManualParseError(null);
-                  setHostedLinkExtractedPublicTokens([]);
-                  return;
-                }
-                try {
-                  const tokens = parseHostedLinkPublicTokens(text);
-                  setHostedLinkExtractedPublicTokens(tokens);
-                  setHostedLinkManualParseError(null);
-                } catch (err: any) {
-                  setHostedLinkExtractedPublicTokens([]);
-                  setHostedLinkManualParseError(err?.message || 'Invalid payload');
-                }
-              }}
-              rows={10}
-              style={{
-                width: '100%',
-                minHeight: 220,
-                background: 'var(--input-bg)',
-                border: '1px solid var(--input-border)',
-                borderRadius: 12,
-                color: 'var(--input-text)',
-                padding: 12,
-                fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
-                fontSize: 12,
-                resize: 'vertical',
-              }}
-              placeholder={'public-sandbox-...\n\nor\n\n{\n  "public_tokens": ["public-sandbox-...", "public-sandbox-..."]\n}'}
-            />
-            {hostedLinkManualParseError && (
+            {hostedLinkFetchError && (
               <div className="config-error" style={{ marginTop: 10 }}>
-                {hostedLinkManualParseError}
+                {hostedLinkFetchError}
               </div>
             )}
           </div>
-          <div className="modal-button-row three-buttons">
-            <button
-              className="action-button button-red"
-              onClick={() => {
-                setHostedLinkManualPayload('');
-                setHostedLinkManualParseError(null);
-                setHostedLinkExtractedPublicTokens([]);
-              }}
-            >
-              Clear
-            </button>
-            <button
-              className="action-button button-gray"
+          <div className="modal-button-row single-button">
+            <ArrowButton
+              variant="blue"
               onClick={async () => {
                 const currentLinkToken = linkToken;
                 if (!currentLinkToken) {
-                  setHostedLinkManualParseError('No link_token available');
+                  setHostedLinkFetchError('No link_token available');
                   return;
                 }
+                setHostedLinkFetchError(null);
                 setModalState('processing-accounts');
                 try {
                   const resp = await fetch('/api/link-token-get', {
@@ -6997,12 +6956,17 @@ export default function Home() {
                     setModalState('api-error');
                     return;
                   }
-                  const itemAddResults = data?.link_sessions?.[0]?.results?.item_add_results ?? [];
-                  const tokens: string[] = itemAddResults
-                    .map((r: any) => r?.public_token)
-                    .filter((t: any): t is string => typeof t === 'string' && t.length > 0);
+                  const tokens = extractPublicTokensFromLinkTokenGet(data);
                   if (tokens.length === 0) {
-                    setHostedLinkManualParseError('No public_tokens found in /link/token/get response. Link session may not be finished yet.');
+                    if (allowForwardWithoutTokens) {
+                      if (isUpdateMode) {
+                        returnToProductMenuNoRemove();
+                        return;
+                      }
+                      await handleHostedLinkForward([]);
+                      return;
+                    }
+                    setHostedLinkFetchError('No public_tokens found in /link/token/get response. Link session may not be finished yet.');
                     setModalState('hosted-waiting');
                     return;
                   }
@@ -7017,19 +6981,6 @@ export default function Home() {
                   setModalState('api-error');
                 }
               }}
-            >
-              Fetch Tokens
-            </button>
-            <ArrowButton
-              variant="blue"
-              onClick={() => {
-                if (isUpdateMode) {
-                  returnToProductMenuNoRemove();
-                  return;
-                }
-                handleHostedLinkForward(hostedLinkExtractedPublicTokens);
-              }}
-              disabled={!allowForwardWithoutTokens && hostedLinkExtractedPublicTokens.length === 0}
             />
           </div>
         </div>
@@ -7562,15 +7513,13 @@ export default function Home() {
                       label="Hosted Link"
                       checked={tempHostedLinkEnabled}
                       onChange={handleToggleHostedLink}
-                      disabled={tempLayerMode || tempUpdateModeEnabled || !effectiveWebhookConfigUrlForSettings}
+                      disabled={tempLayerMode || !effectiveWebhookConfigUrlForSettings}
                       tooltip={
                         tempLayerMode
                           ? 'Disable Layer to use Hosted Link'
-                          : tempUpdateModeEnabled
-                            ? 'Disable Update Mode to use Hosted Link'
-                            : !effectiveWebhookConfigUrlForSettings
-                              ? 'Set your webhook URL below to enable Hosted Link'
-                              : undefined
+                          : !effectiveWebhookConfigUrlForSettings
+                            ? 'Set your webhook URL below to enable Hosted Link'
+                            : undefined
                       }
                     />
                     <SettingsPill
@@ -7608,7 +7557,6 @@ export default function Home() {
                       disabled={
                         tempLayerMode ||
                         tempEmbeddedMode ||
-                        tempHostedLinkEnabled ||
                         tempMultiItemLinkEnabled ||
                         tempBypassLink
                       }
@@ -7617,13 +7565,11 @@ export default function Home() {
                           ? 'Disable Layer to use Update Mode'
                           : tempEmbeddedMode
                             ? 'Disable Embedded Link to use Update Mode'
-                            : tempHostedLinkEnabled
-                              ? 'Disable Hosted Link to use Update Mode'
-                              : tempMultiItemLinkEnabled
-                                ? 'Disable Multi-item Link to use Update Mode'
-                                : tempBypassLink
-                                  ? 'Disable Bypass Link to use Update Mode'
-                                  : undefined
+                            : tempMultiItemLinkEnabled
+                              ? 'Disable Multi-item Link to use Update Mode'
+                              : tempBypassLink
+                                ? 'Disable Bypass Link to use Update Mode'
+                                : undefined
                       }
                     />
                     <SettingsPill

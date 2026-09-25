@@ -87,8 +87,8 @@ CRA products use a **user-based** flow:
 When **Hosted Link** is enabled:
 
 - `/link/token/create` includes `hosted_link: {}` and returns `hosted_link_url`
-- The app opens Hosted Link in a new tab and waits for `LINK/SESSION_FINISHED`
-- After completion, it continues with the standard exchange → picker → product flow
+- The app opens Hosted Link in a new tab
+- After you finish, continue reads `public_token` values from `/link/token/get` (`results.item_add_results`, `results.item_add_result`, or `tokens`) and continues with the standard exchange → picker → product flow
 
 ### Layer flow
 
@@ -102,12 +102,13 @@ When **Layer** is enabled, Plaid Flash uses **Layer + Link** (behind the scenes)
 
 ### Update Mode
 
-Update Mode is a Settings toggle in the **Link** card (mutually exclusive with Layer / Embedded Link / Hosted Link / Multi-item Link / Bypass Link). When it's on:
+Update Mode is a Settings toggle in the **Link** card (mutually exclusive with Layer / Embedded Link / Multi-item Link / Bypass Link). It can be combined with **Hosted Link**. When it's on:
 
 1. Pick the products you want to drive after Link in the wizard, then click **Start**.
 2. Paste an `access_token`, `user_id`, or `user_token` in the input modal.
-3. Plaid Flash builds a `/link/token/create` config that combines your token with the selected products and opens Link in update mode.
-4. After Link succeeds, the post-Link picker lets you call any of the selected products' APIs against the user-supplied token (no `public_token` exchange happens — the token you pasted is used directly).
+3. Plaid Flash builds a `/link/token/create` config that combines your token with the selected products and opens Link in update mode. If Hosted Link is also on, that config includes `hosted_link: {}`.
+4. Without Hosted Link, the post-Link picker lets you call any of the selected products' APIs against the user-supplied token (no `public_token` exchange happens — the token you pasted is used directly).
+5. With Hosted Link, submitting `/link/token/create` opens the Hosted Link URL. Continuing calls `/link/token/get` and exchanges whatever public tokens that response contains, the same as a non-update Hosted session.
 
 ### Upgrade Mode
 
@@ -164,10 +165,10 @@ The **Settings** modal is organized into three cards — **Flash**, **Link**, an
 
 ### Link
 
-The Link-mode toggles below are mutually exclusive — enabling one disables the others:
+The Link-mode toggles below are mutually exclusive — enabling one disables the others — except **Update Mode** and **Hosted Link**, which can be on together:
 
 - **Embedded Link**: runs Link using the embedded Link experience.
-- **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then continues once a `SESSION_FINISHED` webhook is received. Requires a webhook URL.
+- **Hosted Link**: enables Hosted Link (`hosted_link: {}`), opens `hosted_link_url` in a new tab, then reads public tokens from `/link/token/get` when you continue. Requires a webhook URL. Can be combined with Update Mode.
 - **Multi-item Link**: enables `enable_multi_item_link: true`. Non-CRA flows use Plaid webhooks to capture `public_tokens[]` and includes an Item picker when multiple Items are added.
 - **Bypass Link**: uses Sandbox endpoints (`/sandbox/public_token/create`) to create items without Link UI and go straight to downstream calls.
 - **Update Mode**: when enabled, clicking **Start** in the wizard prompts you for an existing `access_token` / `user_id` / `user_token`, then opens Link in update mode against the selected products. See [Update Mode](#update-mode).
@@ -185,7 +186,7 @@ Other Link-card settings:
 
 ## Webhooks
 
-Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. For Hosted Link, the app prompts you to paste the `SESSION_FINISHED` webhook payload before continuing; for CRA flows, you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed on the product API preview when it arrives.
+Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. For Hosted Link, finish the session in the other tab, then continue so the app can read public tokens from `/link/token/get`; for CRA flows, you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed on the product API preview when it arrives.
 
 ## Testing
 
