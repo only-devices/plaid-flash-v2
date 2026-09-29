@@ -3990,6 +3990,10 @@ export default function Home() {
       // Check if we should skip accounts/get (same logic as normal mode)
       const skipAccountsGet = productId === 'signal-balance';
 
+      // Prefer the active Item when the user has switched it via the
+      // multi-item dropdown; otherwise use the token from Link.
+      const tokenForCall = accessTokenRef.current || demoAccessToken;
+
       let accountsData = null;
 
       if (!skipAccountsGet) {
@@ -3999,7 +4003,7 @@ export default function Home() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ access_token: demoAccessToken }),
+          body: JSON.stringify({ access_token: tokenForCall }),
         });
 
         accountsData = await accountsResponse.json();
@@ -4016,12 +4020,13 @@ export default function Home() {
       }
 
       // Build request body with access token and any additional params
-      // Pass accountsData only if it was fetched (not for Signal Balance)
+      // Pass accountsData only if it was fetched (not for Signal Balance).
       const requestBody = buildProductRequestBody(
-        { access_token: demoAccessToken }, 
+        { access_token: tokenForCall }, 
         productConfig,
         skipAccountsGet ? undefined : accountsData
       );
+      setProductApiConfig(requestBody);
       
       const productResponse = await fetch(productConfig.apiEndpoint, {
         method: 'POST',
@@ -5260,21 +5265,25 @@ export default function Home() {
       if (!activeAccessToken) {
         throw new Error('No access_token returned from exchange');
       }
+      accessTokenRef.current = activeAccessToken;
       setAccessToken(activeAccessToken);
+
+      // Wizard sessions land on the post-Link picker ("Call those APIs"),
+      // same as non-multi-item flows. Multi-item Link forces /user/create,
+      // which selects a leaf only so that step has a product context — that
+      // selection must not skip the picker and auto-run each product API.
+      if (demoMode && !demoLinkCompleted) {
+        setDemoAccessToken(activeAccessToken);
+        setDemoLinkCompleted(true);
+        setShowModal(false);
+        setShowProductModal(true);
+        return;
+      }
 
       // Continue with existing downstream flow (accounts/get -> product flow)
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
-      // Wizard sessions don't select a single product until after Link.
-      // Exchange already happened; hand back to the picker with the new token.
       if (!productConfig) {
-        if (demoMode && !demoLinkCompleted) {
-          setDemoAccessToken(activeAccessToken);
-          setDemoLinkCompleted(true);
-          setShowModal(false);
-          setShowProductModal(true);
-          return;
-        }
         throw new Error('Product configuration not found');
       }
 
@@ -5743,7 +5752,9 @@ export default function Home() {
       if (!next?.access_token) return;
 
       setActiveMultiItemAccessTokenIndex(nextIndex);
+      accessTokenRef.current = next.access_token;
       setAccessToken(next.access_token);
+      setDemoAccessToken(next.access_token);
 
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = getProductConfigById(effectiveProductId!);
