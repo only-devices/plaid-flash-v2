@@ -533,13 +533,41 @@ export default function Home() {
       });
   }, [demoProductsVisibility, getProductDisableInfo, layerFlowEnabled]);
 
+  // Pre-Link picker. PDF companions share a Link flow with their report
+  // product, so they stay off this screen.
+  const landingWizardCards: WizardCard[] = useMemo(() => {
+    const visibleOnLanding = (pill: WizardPill) =>
+      !getProductConfigById(pill.id)?.hideFromLanding;
+    return wizardCards
+      .map((card) => ({
+        ...card,
+        pills: card.pills.filter(visibleOnLanding),
+        subgroups: card.subgroups
+          .map((sg) => ({ ...sg, pills: sg.pills.filter(visibleOnLanding) }))
+          .filter((sg) => sg.pills.length > 0),
+        bottomPills: (card.bottomPills ?? []).filter(visibleOnLanding),
+      }))
+      .filter(
+        (card) =>
+          card.pills.length > 0 ||
+          card.subgroups.length > 0 ||
+          (card.bottomPills?.length ?? 0) > 0
+      );
+  }, [wizardCards]);
+
   // Filter the wizard cards down to just the leaves the user enabled
   // pre-Link. Used in `pick` mode after Link is completed. Upgrade Mode
   // owns its own post-Link branch (`upgrade-mode-pick-product` modal), so
   // it never reappears in the picker even when selected pre-Link.
+  // PDF companions are included when their report product was selected,
+  // since that Link session already covers the PDF call.
   const wizardPickerCards: WizardCard[] = useMemo(() => {
-    const visible = (pill: WizardPill) =>
-      !!demoProductsVisibility[pill.id] && pill.id !== 'link-upgrade-mode';
+    const visible = (pill: WizardPill) => {
+      if (pill.id === 'link-upgrade-mode') return false;
+      if (demoProductsVisibility[pill.id]) return true;
+      const companionOf = getProductConfigById(pill.id)?.postLinkCompanionOf;
+      return !!companionOf && !!demoProductsVisibility[companionOf];
+    };
     return wizardCards
       .map((card) => ({
         ...card,
@@ -7392,7 +7420,7 @@ export default function Home() {
           />
         ) : (
           <ProductWizard
-            cards={wizardCards}
+            cards={landingWizardCards}
             mode="select"
             title="What do you want to test?"
             subtitle=""

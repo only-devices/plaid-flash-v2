@@ -75,6 +75,16 @@ describe('productConfig', () => {
       expect(voaPdf?.returnsPdf).toBe(true);
     });
 
+    it('Home Lending and Income Insights PDFs share Link with their report products', () => {
+      const incomePdf = getProductConfigById('cra-income-insights-pdf');
+      expect(incomePdf?.hideFromLanding).toBe(true);
+      expect(incomePdf?.postLinkCompanionOf).toBe('cra-income-insights');
+
+      const voaPdf = getProductConfigById('cra-home-lending-voa-pdf');
+      expect(voaPdf?.hideFromLanding).toBe(true);
+      expect(voaPdf?.postLinkCompanionOf).toBe('cra-home-lending-voa');
+    });
+
     it('products with layerTemplateId have valid template IDs', () => {
       const auth = getProductConfigById('auth');
       expect(auth?.layerTemplateId).toMatch(/^template_/);

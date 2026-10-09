@@ -37,6 +37,8 @@ export interface ProductConfig {
   sandboxProducts?: string[]; // Override `products` for /sandbox/public_token/create initial_products
   layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
   returnsPdf?: boolean; // When true, success step renders a PDF viewer instead of JSON
+  hideFromLanding?: boolean; // Omit from the pre-Link product picker; Link is shared with another leaf
+  postLinkCompanionOf?: string; // Also offer this leaf after Link when that product id was selected
   pdfResponseKey?: string; // Key in API response holding base64 PDF (default 'pdf')
   noAccessToken?: boolean; // When true, leaf does not require Link or access_token (e.g., /transactions/enrich)
   sampleApiBody?: Record<string, any>; // Pre-populated request body for the preview-product-api JSON editor
@@ -442,8 +444,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         children: [
           {
             id: 'cra-home-lending-voa',
-            name: 'Home Lending VOA',
-            shortName: 'Home Lending VOA',
+            name: 'Home Lending Report',
+            shortName: 'Home Lending Report',
             products: ['cra_base_report'],
             required_if_supported: [],
             gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
@@ -452,14 +454,14 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiTitle: '/cra/check_report/verification/get',
             isCRA: true,
             additionalApiParams: {
-              reports_requested: ['voa'],
+              reports_requested: ['voa', 'income'],
             },
             additionalLinkParams: {
               consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
               cra_options: {
                 base_report: {
-                  gse_options: {
-                    report_types: ['VOA']
+                  home_lending_report_options: {
+                    reports_requested: ['VOA', 'INCOME']
                   }
                 }
               }
@@ -470,8 +472,8 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
           },
           {
             id: 'cra-home-lending-voa-pdf',
-            name: 'Home Lending VOA PDF',
-            shortName: 'Home Lending VOA PDF',
+            name: 'Home Lending Report PDF',
+            shortName: 'Home Lending Report PDF',
             products: ['cra_base_report'],
             required_if_supported: [],
             gradient: 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)',
@@ -480,17 +482,23 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             apiTitle: '/cra/check_report/verification/pdf/get',
             isCRA: true,
             additionalApiParams: {
-              report_requested: 'voa',
+              reports_requested: ['voa', 'income'],
             },
             additionalLinkParams: {
               consumer_report_permissible_purpose: 'ACCOUNT_REVIEW_CREDIT',
-              gse_options: {
-                report_types: 'VOA',
-              },
+              cra_options: {
+                base_report: {
+                  home_lending_report_options: {
+                    reports_requested: ['VOA', 'INCOME']
+                  }
+                }
+              }
             },
             requiresWebhook: true,
             layerTemplateId: 'template_jbeu3j65l0z7',
-            returnsPdf: true
+            returnsPdf: true,
+            hideFromLanding: true,
+            postLinkCompanionOf: 'cra-home-lending-voa'
           }
         ]
       },
@@ -559,7 +567,9 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
             },
             requiresWebhook: true,
             layerTemplateId: 'template_jbeu3j65l0z7',
-            returnsPdf: true
+            returnsPdf: true,
+            hideFromLanding: true,
+            postLinkCompanionOf: 'cra-income-insights'
           }
         ]
       },

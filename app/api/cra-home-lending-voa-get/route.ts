@@ -4,7 +4,7 @@ import { applyUserIdOrToken, proxyPlaidJson } from '@/lib/server/plaidApi';
 export async function POST(request: NextRequest) {
   const { user_id, user_token, ...rest } = (await request.json()) || {};
   const body: Record<string, unknown> = {
-    reports_requested: ['voa'],
+    reports_requested: ['voa', 'income'],
     ...rest,
   };
   applyUserIdOrToken(body, user_id, user_token);
