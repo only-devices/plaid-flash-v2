@@ -684,3 +684,17 @@ export const collectLeafConfigs = (cfg: ProductConfig): ProductConfig[] => {
   return cfg.children.flatMap(collectLeafConfigs);
 };
 
+// Non-CRA leaves that call an API with the access_token returned from Link.
+// Used when a session is opened from an existing link token, where the
+// original /link/token/create product list is unknown. Enrich is excluded
+// because it does not use an access_token.
+export const isNonCraAccessTokenProduct = (
+  cfg: ProductConfig | undefined
+): cfg is ProductConfig => {
+  if (!cfg?.apiEndpoint) return false;
+  if (cfg.isCRA) return false;
+  if (cfg.noAccessToken) return false;
+  if (cfg.id === 'link' || cfg.id.startsWith('link-')) return false;
+  return true;
+};
+

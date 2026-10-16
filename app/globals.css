@@ -3800,6 +3800,8 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
 .wizard-cta-row {
   display: flex;
   justify-content: center;
+  align-items: stretch;
+  gap: 10px;
   margin-top: 18px;
   flex-shrink: 0;
 }
@@ -3807,6 +3809,24 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
 .wizard-continue-button {
   min-width: 200px;
   flex: 0 0 auto;
+}
+
+/* Square companion to Start. Stretch matches Start's height; aspect-ratio
+   makes the width equal that height. */
+.wizard-existing-link-button {
+  flex: 0 0 auto;
+  align-self: stretch;
+  aspect-ratio: 1;
+  width: auto;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-existing-link-button svg {
+  width: 22px;
+  height: 22px;
 }
 
 /* Settings/reset corner buttons. Pin them inside the wizard / settings

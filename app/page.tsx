@@ -12,7 +12,7 @@ import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
-import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs } from '@/lib/productConfig';
+import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 import { extractPublicTokensFromLinkTokenGet } from '@/lib/linkTokenGetPublicTokens';
 import {
@@ -87,6 +87,10 @@ function plaidUserIdForSessionToken(data: any): string | null {
   return null;
 }
 
+function isPlaidLinkToken(value: string): boolean {
+  return /^link-(sandbox|development|production)-.+$/.test(value.trim());
+}
+
 export default function Home() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
@@ -131,6 +135,7 @@ export default function Home() {
     | 'creating-sandbox-item'
     | 'hosted-waiting'
     | 'update-mode-input'
+    | 'existing-link-token'
     | 'upgrade-mode-pick-product'
     | 'hybrid-step'
     | 'cashflow-updates-loading-items'
@@ -205,6 +210,12 @@ export default function Home() {
   // URL and read public tokens from /link/token/get.
   const [updateModeEnabled, setUpdateModeEnabled] = useState(false);
   const [tempUpdateModeEnabled, setTempUpdateModeEnabled] = useState(false);
+  // Existing link token: skip /link/token/create and open Link with a pasted
+  // token. The post-Link picker then offers every non-CRA access-token product
+  // because the original product list is not known.
+  const [existingLinkTokenInput, setExistingLinkTokenInput] = useState('');
+  const [existingLinkTokenMode, setExistingLinkTokenMode] = useState(false);
+  const existingLinkTokenModeRef = useRef(false);
   // Set by Settings Save when Layer (or Layer Identity Match) is on so the
   // Layer session starts immediately instead of returning to the wizard.
   const [pendingLayerStart, setPendingLayerStart] = useState(false);
@@ -564,6 +575,9 @@ export default function Home() {
   const wizardPickerCards: WizardCard[] = useMemo(() => {
     const visible = (pill: WizardPill) => {
       if (pill.id === 'link-upgrade-mode') return false;
+      if (existingLinkTokenMode) {
+        return isNonCraAccessTokenProduct(getProductConfigById(pill.id));
+      }
       if (demoProductsVisibility[pill.id]) return true;
       const companionOf = getProductConfigById(pill.id)?.postLinkCompanionOf;
       return !!companionOf && !!demoProductsVisibility[companionOf];
@@ -583,7 +597,7 @@ export default function Home() {
           card.subgroups.length > 0 ||
           (card.bottomPills?.length ?? 0) > 0
       );
-  }, [wizardCards, demoProductsVisibility]);
+  }, [wizardCards, demoProductsVisibility, existingLinkTokenMode]);
 
   const hasAnyEnabledLeaf = useMemo(
     () => Object.values(demoProductsVisibility).some(Boolean),
@@ -2484,25 +2498,103 @@ export default function Home() {
     }
   };
 
+  // True when `state` still has the data its pane renders. Restoring a
+  // stable state whose payload was already cleared (success after Back to
+  // Products, for example) leaves an empty modal.
+  const modalStateHasContent = (state: typeof modalState): boolean => {
+    switch (state) {
+      case 'preview-user-create':
+        return !!userCreateConfig;
+      case 'preview-user-update':
+        return !!userUpdateConfig;
+      case 'preview-session-token':
+        return !!sessionTokenConfig;
+      case 'preview-config':
+        return !!linkTokenConfig;
+      case 'preview-sandbox-config':
+        return !!sandboxConfig;
+      case 'preview-product-api':
+        return !!productApiConfig;
+      case 'callback-success':
+      case 'callback-exit':
+      case 'callback-exit-zap':
+        return !!callbackData;
+      case 'accounts-data':
+        return !!accountsData;
+      case 'hybrid-step':
+        return !!hybridStepData;
+      case 'success':
+      case 'zap-mode-results':
+        return !!productData;
+      case 'existing-link-token':
+      case 'update-mode-input':
+      case 'layer-phone-submit':
+      case 'layer-dob-submit':
+      case 'layer-identity-match-results':
+      case 'upgrade-mode-pick-product':
+      case 'cashflow-updates-pick-item':
+      case 'cashflow-updates-webhooks':
+      case 'error':
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const returnToPostLinkProductPicker = () => {
+    setProductData(null);
+    setAccountsData(null);
+    setSelectedProduct(null);
+    setSelectedChildProduct(null);
+    setSelectedGrandchildProduct(null);
+    lastStableModalStateRef.current = 'loading';
+    setModalState('loading');
+    setShowModal(false);
+    setShowProductModal(true);
+  };
+
   const handleGoBackFromApiError = () => {
     setErrorData(null);
     setApiStatusCode(200);
     const previous = lastStableModalStateRef.current;
     const validStableStates: typeof modalState[] = [
       'preview-user-create', 'preview-user-update', 'preview-session-token', 'preview-config', 'preview-sandbox-config', 'preview-product-api',
-      'callback-success', 'callback-exit', 'callback-exit-zap', 'accounts-data', 'update-mode-input',
+      'callback-success', 'callback-exit', 'callback-exit-zap', 'accounts-data', 'update-mode-input', 'existing-link-token',
       'upgrade-mode-pick-product', 'hybrid-step', 'cashflow-updates-pick-item', 'cashflow-updates-webhooks',
       'success', 'error', 'zap-mode-results', 'layer-phone-submit', 'layer-waiting-eligibility', 'layer-dob-submit',
       'layer-identity-match-results',
     ];
-    if (previous && validStableStates.includes(previous)) {
+    // Screens the user has already left once Link is done. Restoring them
+    // after a product API error either shows a blank pane (the response was
+    // cleared) or drops them back on the Link callback.
+    const leftBehindAfterLink = new Set<typeof modalState>([
+      'callback-success',
+      'callback-exit',
+      'callback-exit-zap',
+      'success',
+      'accounts-data',
+      'existing-link-token',
+    ]);
+    const previousIsUsable =
+      !!previous && validStableStates.includes(previous) && modalStateHasContent(previous);
+    const returnToProductPicker =
+      demoLinkCompleted &&
+      (!previousIsUsable || leftBehindAfterLink.has(previous));
+
+    if (returnToProductPicker) {
+      returnToPostLinkProductPicker();
+      return;
+    }
+
+    if (previousIsUsable) {
       setModalState(previous);
       setShowModal(true);
-    } else {
-      setModalState('loading');
-      setShowProductModal(true);
-      setShowModal(false);
+      return;
     }
+
+    setModalState('loading');
+    setShowProductModal(true);
+    setShowModal(false);
   };
 
   const handleGoBackFromProductApiPreview = () => {
@@ -2794,6 +2886,32 @@ export default function Home() {
       return;
     }
     handleDemoModeStart();
+  };
+
+  const clearExistingLinkTokenMode = useCallback(() => {
+    existingLinkTokenModeRef.current = false;
+    setExistingLinkTokenMode(false);
+  }, []);
+
+  const handleOpenExistingLinkToken = () => {
+    setExistingLinkTokenInput('');
+    setShowProductModal(false);
+    setModalState('existing-link-token');
+    setShowModal(true);
+  };
+
+  const handleLaunchExistingLinkToken = () => {
+    const token = existingLinkTokenInput.trim();
+    if (!isPlaidLinkToken(token)) return;
+
+    existingLinkTokenModeRef.current = true;
+    setExistingLinkTokenMode(true);
+    setShowWelcome(false);
+    setShowProductModal(false);
+    setLinkEvents([]);
+    setLinkToken(token);
+    setModalState('loading');
+    setShowModal(false);
   };
 
   useEffect(() => {
@@ -3297,8 +3415,10 @@ export default function Home() {
       return;
     }
 
-    if (zapMode) {
-      // Zap Mode: skip callback modal, go directly to API calls
+    if (zapMode && !existingLinkTokenModeRef.current) {
+      // Zap Mode: skip callback modal, go directly to API calls.
+      // An existing-token session has no single selected product, so it
+      // stays on the standard callback path and lands on the product picker.
       handleZapModeSuccess(public_token, metadata);
     } else {
       // Default mode and Demo Mode: show callback modal
@@ -3978,18 +4098,10 @@ export default function Home() {
   };
 
   const handleBackToProducts = () => {
-    // Clear current product data
-    setProductData(null);
-    setAccountsData(null);
-    setSelectedProduct(null);
-    setSelectedChildProduct(null);
-    setSelectedGrandchildProduct(null);
-    
-    // Hide success modal and show product selector
-    setShowModal(false);
-    setShowProductModal(true);
-    
-    // Keep demoLinkCompleted and demoAccessToken intact for next product selection
+    // Clear the success payload and return to the post-Link picker.
+    // Reset the remembered modal too, so a later API error does not restore
+    // this success pane after its data is gone.
+    returnToPostLinkProductPicker();
   };
 
   const handleDemoModeApiCall = async (productId: string) => {
@@ -4139,6 +4251,7 @@ export default function Home() {
       setSelectedGrandchildProduct(null);
       setLinkEvents([]);
       setShowProductModal(true);
+      clearExistingLinkTokenMode();
       return;
     }
 
@@ -4155,7 +4268,7 @@ export default function Home() {
       err: err || null,
       metadata
     });
-  }, [multiItemLinkEnabled, zapMode]);
+  }, [multiItemLinkEnabled, zapMode, clearExistingLinkTokenMode]);
 
   const onEvent = useCallback((eventName: string, metadata: any) => {
     // Add event to the logs
@@ -4245,6 +4358,7 @@ export default function Home() {
     setHybridStepStatusCode(200);
     // Clear link token and selected products to prevent auto-opening
     setLinkToken(null);
+    clearExistingLinkTokenMode();
     setSelectedProduct(null);
     setSelectedChildProduct(null);
     setSelectedGrandchildProduct(null);
@@ -4501,7 +4615,7 @@ export default function Home() {
     // In Demo Mode, we can open Link without a selected product
     // In normal mode, we need a selected product
     // Layer sessions manage opening Link via LAYER_READY (never auto-open here).
-    const shouldOpenLink = ready && linkToken && !layerSessionActive && !hostedLinkActive && !hostedLinkEnabled && !showModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
+    const shouldOpenLink = ready && linkToken && !layerSessionActive && !hostedLinkActive && (existingLinkTokenMode || !hostedLinkEnabled) && !showModal && !showProductModal && !showZapResetButton && !embeddedLinkActive &&
       (demoMode || selectedProduct || selectedChildProduct || selectedGrandchildProduct);
     
     if (shouldOpenLink) {
@@ -4520,7 +4634,7 @@ export default function Home() {
         open();
       }
     }
-  }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink]);
+  }, [ready, linkToken, layerSessionActive, selectedProduct, selectedChildProduct, selectedGrandchildProduct, showModal, showProductModal, showZapResetButton, zapMode, demoMode, embeddedMode, embeddedLinkActive, open, openEmbeddedLink, existingLinkTokenMode, hostedLinkEnabled]);
 
   // Walk the wizard's `demoProductsVisibility` selections, expand them to
   // their leaf configs, and aggregate the union of `products` /
@@ -4871,6 +4985,7 @@ export default function Home() {
       setDemoPendingSandboxConfig(null);
       setDemoPendingLinkTokenConfig(null);
       setUsedUserToken(false);
+      clearExistingLinkTokenMode();
 
       // Reset CRA state
       setUserCreateConfig(null);
@@ -4980,6 +5095,7 @@ export default function Home() {
     setDemoPendingSandboxConfig(null);
     setDemoPendingLinkTokenConfig(null);
     setUsedUserToken(false);
+    clearExistingLinkTokenMode();
 
     // Reset CRA state
     setUserCreateConfig(null);
@@ -6042,6 +6158,64 @@ export default function Home() {
   }, [usedUserToken, userToken, userId]);
 
   const renderModalContent = () => {
+    if (modalState === 'existing-link-token') {
+      const raw = existingLinkTokenInput.trim();
+      const canProceed = isPlaidLinkToken(raw);
+
+      return (
+        <div className="modal-success">
+          <div className="success-header">
+            <h2>Existing Link</h2>
+          </div>
+          <div className="account-data">
+            <p style={{ marginTop: 0, marginBottom: 12, opacity: 0.85 }}>
+              Paste a <code>link_token</code> to open that Link session.
+            </p>
+            <textarea
+              value={existingLinkTokenInput}
+              onChange={(e) => setExistingLinkTokenInput(e.target.value)}
+              rows={4}
+              style={{
+                width: '100%',
+                minHeight: 110,
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
+                borderRadius: 12,
+                color: 'var(--input-text)',
+                padding: 12,
+                fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
+                fontSize: 12,
+                resize: 'vertical',
+              }}
+              placeholder="link-sandbox-..."
+            />
+            <p style={{ marginTop: 10, marginBottom: 0, opacity: 0.75, fontSize: 12 }}>
+              {canProceed
+                ? 'Ready to open Link.'
+                : 'Enter a link token (link-sandbox-…, link-development-…, or link-production-…).'}
+            </p>
+            {!canProceed && raw.length > 0 && (
+              <div className="config-error" style={{ marginTop: 10 }}>
+                Unrecognized link token. Expected a <code>link-sandbox-</code>, <code>link-development-</code>, or <code>link-production-</code> value.
+              </div>
+            )}
+          </div>
+          <div className="modal-button-row two-buttons">
+            <ArrowButton
+              variant="red"
+              direction="back"
+              onClick={handleGoBackToProducts}
+            />
+            <ArrowButton
+              variant="blue"
+              disabled={!canProceed}
+              onClick={handleLaunchExistingLinkToken}
+            />
+          </div>
+        </div>
+      );
+    }
+
     if (modalState === 'update-mode-input') {
       const raw = updateModeAccessTokenInput.trim();
       const tokenType: 'access_token' | 'user_token' | 'user_id' | null = raw.startsWith('access-')
@@ -7428,6 +7602,7 @@ export default function Home() {
             onContinue={handleWizardStart}
             continueDisabled={layerFlowEnabled ? false : !hasAnyEnabledLeaf}
             continueLabel="Start"
+            onOpenExistingLink={handleOpenExistingLinkToken}
             onSettingsClick={handleOpenSettings}
             hasCustomSettings={hasCustomSettings}
           />

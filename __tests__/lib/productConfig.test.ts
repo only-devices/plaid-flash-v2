@@ -1,4 +1,4 @@
-import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig } from '@/lib/productConfig';
+import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct } from '@/lib/productConfig';
 
 describe('productConfig', () => {
   describe('PRODUCT_CONFIGS', () => {
@@ -205,6 +205,34 @@ describe('productConfig', () => {
 
       const uniqueIds = new Set(allIds);
       expect(uniqueIds.size).toBe(allIds.length);
+    });
+  });
+
+  describe('isNonCraAccessTokenProduct', () => {
+    const nonCraLeaves = PRODUCTS_ARRAY.flatMap(collectLeafConfigs).filter(isNonCraAccessTokenProduct);
+
+    it('includes access-token products and excludes CRA, Enrich, and Link-only leaves', () => {
+      const ids = nonCraLeaves.map((leaf) => leaf.id).sort();
+      expect(ids).toEqual([
+        'auth',
+        'identity-get',
+        'identity-match',
+        'investments-holdings',
+        'investments-move',
+        'investments-transactions',
+        'liabilities',
+        'signal-balance',
+        'signal-evaluate',
+        'transactions-get',
+        'transactions-sync',
+      ]);
+    });
+
+    it('rejects CRA, Enrich, and leaves without an API', () => {
+      expect(isNonCraAccessTokenProduct(getProductConfigById('cra-base-report'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('transactions-enrich'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('link-upgrade-mode'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('link-update-mode'))).toBe(false);
     });
   });
 });
