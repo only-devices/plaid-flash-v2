@@ -33,6 +33,8 @@ export interface ProductConfig {
   highlightKeys?: string[];
   icon?: string;
   isCRA?: boolean; // CRA products use user_id/user_token instead of access_token
+  craApi?: 'legacy' | 'report'; // legacy check_report calls vs /cra/report/*
+  instantCra?: boolean; // PLAID_NETWORK report get; skips Link
   requiresWebhook?: boolean; // Products that need a webhook URL (like CRA)
   sandboxProducts?: string[]; // Override `products` for /sandbox/public_token/create initial_products
   layerTemplateId?: string; // Layer: template_id to use with /session/token/create (leaf products only)
@@ -656,24 +658,389 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
   }
 };
 
+const CRA_GRADIENT = 'linear-gradient(135deg, #2d9b83 0%, #1a6b5c 100%)';
+const CRA_ICON = '/icons/cra.png';
+const CRA_LAYER_TEMPLATE = 'template_jbeu3j65l0z7';
+const CRA_REPORT_ENDPOINT = '/api/cra-report-get';
+const CRA_REPORT_TITLE = '/cra/report/get';
+
+export const NEW_CRA_DECISION_STAGE = 'DECISIONING';
+export const NEW_CRA_PERMISSIBLE_PURPOSE = 'EXTENSION_OF_CREDIT';
+
+function tagLegacyCra(nodes: ProductConfig[] | undefined): ProductConfig[] {
+  if (!nodes) return [];
+  return nodes.map((node) => ({
+    ...node,
+    ...(node.isCRA && node.apiEndpoint ? { craApi: 'legacy' as const } : {}),
+    ...(node.children ? { children: tagLegacyCra(node.children) } : {}),
+  }));
+}
+
+export const LEGACY_CRA_CHILDREN: ProductConfig[] = tagLegacyCra(PRODUCT_CONFIGS.cra.children);
+
+type NewCraLeafSpec = {
+  id: string;
+  name: string;
+  product: string;
+  version: string;
+  scope: 'CLIENT_USER' | 'PLAID_NETWORK';
+  options?: Record<string, unknown>;
+  sandboxIncome?: boolean;
+};
+
+function buildNewCraLeaf(spec: NewCraLeafSpec): ProductConfig {
+  const productEntry: Record<string, unknown> = {
+    product: spec.product,
+    version: spec.version,
+    ...(spec.options ? { options: spec.options } : {}),
+  };
+  const instant = spec.scope === 'PLAID_NETWORK';
+  return {
+    id: spec.id,
+    name: spec.name,
+    shortName: spec.name,
+    products: [spec.product],
+    required_if_supported: [],
+    gradient: CRA_GRADIENT,
+    icon: CRA_ICON,
+    apiEndpoint: CRA_REPORT_ENDPOINT,
+    apiTitle: CRA_REPORT_TITLE,
+    isCRA: true,
+    craApi: 'report',
+    ...(instant ? { instantCra: true } : {}),
+    highlightKeys: [],
+    requiresWebhook: !instant,
+    ...(instant ? {} : { layerTemplateId: CRA_LAYER_TEMPLATE }),
+    additionalApiParams: {
+      scope: spec.scope,
+      decision_stage: NEW_CRA_DECISION_STAGE,
+      consumer_report_permissible_purpose: NEW_CRA_PERMISSIBLE_PURPOSE,
+      products: [productEntry],
+    },
+    ...(instant
+      ? {}
+      : {
+          additionalLinkParams: {
+            consumer_report_permissible_purpose: NEW_CRA_PERMISSIBLE_PURPOSE,
+            cra_report_parameter: {
+              scope: 'CLIENT_USER',
+              decision_stage: NEW_CRA_DECISION_STAGE,
+              days_requested: 365,
+              products: [productEntry],
+            },
+          },
+        }),
+    ...(spec.sandboxIncome
+      ? {
+          additionalSandboxCreateParams: {
+            initial_products: [spec.product],
+            options: {
+              override_username: 'user_bank_income',
+              override_password: '{}',
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+const LEND_SCORE_OPTIONS = { variants: ['GENERALIST'] };
+
+const UPGRADE_MODE_CONFIG: ProductConfig = {
+  id: 'link-upgrade-mode',
+  name: 'Upgrade Mode',
+  shortName: 'Upgrade Mode',
+  products: [],
+  required_if_supported: [],
+  gradient: 'linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%)',
+  icon: '/icons/layer.png',
+};
+
+function craGroup(id: string, name: string, children: ProductConfig[]): ProductConfig {
+  return {
+    id,
+    name,
+    shortName: name,
+    products: [],
+    required_if_supported: [],
+    gradient: CRA_GRADIENT,
+    icon: CRA_ICON,
+    children,
+  };
+}
+
+export const NEW_CRA_CHILDREN: ProductConfig[] = [
+  buildNewCraLeaf({
+    id: 'cra-report-base',
+    name: 'Base Report',
+    product: 'cra_base_report',
+    version: 'V1',
+    scope: 'CLIENT_USER',
+  }),
+  craGroup('cra-report-underwriting', 'Underwriting', [
+    buildNewCraLeaf({
+      id: 'cra-report-cashflow-insights',
+      name: 'Cash Flow Insights',
+      product: 'cra_cashflow_insights',
+      version: 'V2',
+      scope: 'CLIENT_USER',
+    }),
+    buildNewCraLeaf({
+      id: 'cra-report-lend-score',
+      name: 'LendScore',
+      product: 'cra_lend_score',
+      version: 'V2',
+      scope: 'CLIENT_USER',
+      options: LEND_SCORE_OPTIONS,
+    }),
+    buildNewCraLeaf({
+      id: 'cra-report-lend-score-complete',
+      name: 'LendScore Complete',
+      product: 'cra_lend_score_complete',
+      version: 'V1',
+      scope: 'CLIENT_USER',
+      options: LEND_SCORE_OPTIONS,
+    }),
+    buildNewCraLeaf({
+      id: 'cra-report-network-insights',
+      name: 'Network Insights',
+      product: 'cra_network_insights',
+      version: 'V2',
+      scope: 'CLIENT_USER',
+    }),
+  ]),
+  craGroup('cra-report-home-lending-group', 'Home Lending', [
+    buildNewCraLeaf({
+      id: 'cra-report-home-lending',
+      name: 'Home Lending Insights',
+      product: 'cra_home_lending',
+      version: 'V1',
+      scope: 'CLIENT_USER',
+    }),
+  ]),
+  craGroup('cra-report-income', 'Income', [
+    buildNewCraLeaf({
+      id: 'cra-report-income-insights',
+      name: 'Income Insights',
+      product: 'cra_income_insights',
+      version: 'V2',
+      scope: 'CLIENT_USER',
+      sandboxIncome: true,
+    }),
+    buildNewCraLeaf({
+      id: 'cra-report-income-complete',
+      name: 'Income Complete',
+      product: 'cra_income_complete',
+      version: 'V2',
+      scope: 'CLIENT_USER',
+      sandboxIncome: true,
+    }),
+  ]),
+  craGroup('cra-report-instant-link', 'Instant Link', [
+    buildNewCraLeaf({
+      id: 'cra-instant-cashflow-insights',
+      name: 'Cash Flow Insights',
+      product: 'cra_cashflow_insights',
+      version: 'V2',
+      scope: 'PLAID_NETWORK',
+    }),
+    buildNewCraLeaf({
+      id: 'cra-instant-lend-score',
+      name: 'LendScore',
+      product: 'cra_lend_score',
+      version: 'V2',
+      scope: 'PLAID_NETWORK',
+      options: LEND_SCORE_OPTIONS,
+    }),
+    buildNewCraLeaf({
+      id: 'cra-instant-lend-score-complete',
+      name: 'LendScore Complete',
+      product: 'cra_lend_score_complete',
+      version: 'V1',
+      scope: 'PLAID_NETWORK',
+      options: LEND_SCORE_OPTIONS,
+    }),
+    buildNewCraLeaf({
+      id: 'cra-instant-network-insights',
+      name: 'Network Insights',
+      product: 'cra_network_insights',
+      version: 'V2',
+      scope: 'PLAID_NETWORK',
+    }),
+  ]),
+  UPGRADE_MODE_CONFIG,
+];
+
+// The CRA card defaults to the new /cra/report/* tree. Legacy CRA restores
+// the previous children without removing them from lookup.
+PRODUCT_CONFIGS.cra.children = NEW_CRA_CHILDREN;
+
 export const PRODUCTS_ARRAY = Object.values(PRODUCT_CONFIGS);
 
-// Helper to get config by ID (searches parent, children, and grandchildren)
-export const getProductConfigById = (id: string): ProductConfig | undefined => {
-  for (const config of PRODUCTS_ARRAY) {
-    if (config.id === id) return config;
-    if (config.children) {
-      for (const child of config.children) {
-        if (child.id === id) return child;
-        // Search grandchildren (3rd level)
-        if (child.children) {
-          const grandchild = child.children.find(gc => gc.id === id);
-          if (grandchild) return grandchild;
-        }
+export function productsForCraMode(legacyCra: boolean): ProductConfig[] {
+  const children = legacyCra ? LEGACY_CRA_CHILDREN : NEW_CRA_CHILDREN;
+  return PRODUCTS_ARRAY.map((cfg) => (cfg.id === 'cra' ? { ...cfg, children } : cfg));
+}
+
+export function collectConfigIds(nodes: ProductConfig[]): string[] {
+  const ids: string[] = [];
+  const visit = (node: ProductConfig) => {
+    ids.push(node.id);
+    node.children?.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return ids;
+}
+
+export function clientReportId(): string {
+  return `flash-${Date.now()}`;
+}
+
+/** CLIENT_USER /cra/report/get requires the report_id from /cra/report/create or CRA_REPORT_READY. Instant Link does not. */
+export function craReportGetRequiresReportId(leaf: ProductConfig): boolean {
+  return leaf.craApi === 'report' && !leaf.instantCra;
+}
+
+export function craReportProductKey(products: Array<Record<string, unknown>>): string {
+  return products.map((product) => `${product.product}:${product.version}`).join(',');
+}
+
+/** /cra/report/get with a report_id must not resend the options used at creation. */
+export function productsWithoutReportOptions(
+  products: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  return products.map((product) => {
+    const { options: _options, ...rest } = product;
+    return rest;
+  });
+}
+
+export function buildCraReportCreateRequest(args: {
+  userId: string;
+  products: Array<Record<string, unknown>>;
+  webhook?: string | null;
+  clientReportId?: string;
+}): Record<string, unknown> {
+  return {
+    user_id: args.userId,
+    scope: 'CLIENT_USER',
+    decision_stage: NEW_CRA_DECISION_STAGE,
+    consumer_report_permissible_purpose: NEW_CRA_PERMISSIBLE_PURPOSE,
+    days_requested: 365,
+    client_report_id: args.clientReportId ?? clientReportId(),
+    products: args.products,
+    ...(args.webhook ? { webhook: args.webhook } : {}),
+  };
+}
+
+export function applyClientUserReportId(
+  body: Record<string, any>,
+  reportId: string
+): Record<string, any> {
+  const next: Record<string, any> = { ...body, report_id: reportId };
+  if (Array.isArray(next.products)) {
+    next.products = productsWithoutReportOptions(next.products);
+  }
+  return next;
+}
+
+/**
+ * Body for /cra/report/get.
+ * Instant Link (PLAID_NETWORK) is synchronous: omit report_id and keep product
+ * options such as LendScore variants. CLIENT_USER callers add report_id after
+ * /cra/report/create via applyClientUserReportId.
+ */
+export function buildCraReportGetRequest(
+  leaf: ProductConfig,
+  userId: string
+): Record<string, any> {
+  const params =
+    leaf.additionalApiParams && typeof leaf.additionalApiParams === 'object'
+      ? { ...leaf.additionalApiParams }
+      : {};
+  const body: Record<string, any> = { user_id: userId, ...params };
+  if (!craReportGetRequiresReportId(leaf)) {
+    delete body.report_id;
+  }
+  return body;
+}
+
+export function craReportProductsFromLeaf(leaf: ProductConfig): Array<Record<string, unknown>> {
+  const fromLink = leaf.additionalLinkParams?.cra_report_parameter?.products;
+  if (Array.isArray(fromLink) && fromLink.length > 0) {
+    return fromLink.map((product) => ({ ...product }));
+  }
+  const fromApi = leaf.additionalApiParams?.products;
+  if (Array.isArray(fromApi) && fromApi.length > 0) {
+    return fromApi.map((product) => ({ ...product }));
+  }
+  return [];
+}
+
+export function mergeNewCraLinkParams(
+  leaves: ProductConfig[],
+  reportId: string = clientReportId()
+): Record<string, unknown> | null {
+  const reportLeaves = leaves.filter((leaf) => leaf.craApi === 'report' && !leaf.instantCra);
+  if (reportLeaves.length === 0) return null;
+  const products: Array<Record<string, unknown>> = [];
+  for (const leaf of reportLeaves) {
+    for (const product of craReportProductsFromLeaf(leaf)) {
+      const key = `${product.product}:${product.version}`;
+      if (!products.some((existing) => `${existing.product}:${existing.version}` === key)) {
+        products.push(product);
       }
     }
   }
+  return {
+    consumer_report_permissible_purpose: NEW_CRA_PERMISSIBLE_PURPOSE,
+    cra_report_parameter: {
+      scope: 'CLIENT_USER',
+      decision_stage: NEW_CRA_DECISION_STAGE,
+      days_requested: 365,
+      client_report_id: reportId,
+      products,
+    },
+  };
+}
+
+/** Drop legacy Link fields and stamp a fresh client_report_id for /cra/report/* leaves. */
+export function applyNewCraLinkBody(
+  config: Record<string, any>,
+  leaves: ProductConfig[],
+  reportId?: string
+): Record<string, any> {
+  const merged = mergeNewCraLinkParams(leaves, reportId);
+  if (!merged) return config;
+  const next: Record<string, any> = { ...config, ...merged };
+  delete next.user;
+  delete next.user_token;
+  delete next.cra_options;
+  return next;
+}
+
+export function isInstantCraOnly(leaves: ProductConfig[]): boolean {
+  return leaves.length > 0 && leaves.every((leaf) => !!leaf.instantCra);
+}
+
+function findInTree(configs: ProductConfig[], id: string): ProductConfig | undefined {
+  for (const config of configs) {
+    if (config.id === id) return config;
+    if (config.children) {
+      const found = findInTree(config.children, id);
+      if (found) return found;
+    }
+  }
   return undefined;
+}
+
+// Searches the active tree, then both CRA trees, so legacy and new ids resolve.
+export const getProductConfigById = (id: string): ProductConfig | undefined => {
+  return (
+    findInTree(PRODUCTS_ARRAY, id) ||
+    findInTree(LEGACY_CRA_CHILDREN, id) ||
+    findInTree(NEW_CRA_CHILDREN, id)
+  );
 };
 
 // Recursively collect every leaf descendant of `cfg` (including `cfg` itself

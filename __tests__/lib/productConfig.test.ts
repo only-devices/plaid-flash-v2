@@ -1,4 +1,5 @@
-import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct } from '@/lib/productConfig';
+import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, applyNewCraLinkBody, applyClientUserReportId, buildCraReportGetRequest, craReportGetRequiresReportId, isInstantCraOnly, mergeNewCraLinkParams, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN } from '@/lib/productConfig';
+import { buildUserCreateConfig } from '@/lib/userCreateIdentity';
 
 describe('productConfig', () => {
   describe('PRODUCT_CONFIGS', () => {
@@ -230,9 +231,193 @@ describe('productConfig', () => {
 
     it('rejects CRA, Enrich, and leaves without an API', () => {
       expect(isNonCraAccessTokenProduct(getProductConfigById('cra-base-report'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('cra-report-base'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('transactions-enrich'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('link-upgrade-mode'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('link-update-mode'))).toBe(false);
+    });
+  });
+
+  describe('CRA API trees', () => {
+    it('defaults the CRA panel to the new report tree', () => {
+      const childIds = PRODUCT_CONFIGS.cra.children!.map((child) => child.id);
+      expect(childIds).toContain('cra-report-base');
+      expect(childIds).toContain('cra-report-instant-link');
+      expect(childIds).not.toContain('cra-base-report');
+    });
+
+    it('keeps legacy leaves reachable and flagged', () => {
+      const legacy = getProductConfigById('cra-base-report');
+      expect(legacy?.craApi).toBe('legacy');
+      expect(legacy?.isCRA).toBe(true);
+      expect(legacy?.additionalLinkParams?.cra_options?.days_requested).toBe(365);
+      expect(legacy?.additionalLinkParams?.cra_report_parameter).toBeUndefined();
+      expect(productsForCraMode(true)[0] && getProductConfigById('cra-cashflow-updates')?.apiEndpoint).toBe(
+        '/api/cra-cashflow-updates-get'
+      );
+      const legacyIds = LEGACY_CRA_CHILDREN.flatMap(collectLeafConfigs).map((leaf) => leaf.id);
+      expect(legacyIds).toEqual(expect.arrayContaining([
+        'cra-base-report',
+        'cra-income-insights-pdf',
+        'cra-partner-insights',
+        'cra-cashflow-updates',
+        'cra-home-lending-voa-pdf',
+      ]));
+    });
+
+    it('describes new Link and report bodies without cra_options', () => {
+      const base = getProductConfigById('cra-report-base');
+      expect(base?.craApi).toBe('report');
+      expect(base?.apiEndpoint).toBe('/api/cra-report-get');
+      expect(base?.apiTitle).toBe('/cra/report/get');
+      expect(base?.additionalLinkParams?.cra_options).toBeUndefined();
+      expect(base?.additionalLinkParams?.cra_report_parameter?.products).toEqual([
+        { product: 'cra_base_report', version: 'V1' },
+      ]);
+      expect(base?.additionalApiParams).toMatchObject({
+        scope: 'CLIENT_USER',
+        decision_stage: 'DECISIONING',
+        consumer_report_permissible_purpose: 'EXTENSION_OF_CREDIT',
+      });
+
+      const lendScore = getProductConfigById('cra-report-lend-score');
+      expect(lendScore?.additionalLinkParams?.cra_report_parameter?.products).toEqual([
+        { product: 'cra_lend_score', version: 'V2', options: { variants: ['GENERALIST'] } },
+      ]);
+
+      const home = getProductConfigById('cra-report-home-lending');
+      expect(home?.products).toEqual(['cra_home_lending']);
+      expect(home?.additionalApiParams?.products?.[0]?.version).toBe('V1');
+
+      const incomeComplete = getProductConfigById('cra-report-income-complete');
+      expect(incomeComplete?.additionalApiParams?.products?.[0]).toEqual({
+        product: 'cra_income_complete',
+        version: 'V2',
+      });
+    });
+
+    it('retrieves Instant Link reports without Link or report_id', () => {
+      const instantLeaves = NEW_CRA_CHILDREN
+        .flatMap(collectLeafConfigs)
+        .filter((leaf) => leaf.instantCra);
+      expect(instantLeaves.map((leaf) => leaf.products[0])).toEqual([
+        'cra_cashflow_insights',
+        'cra_lend_score',
+        'cra_lend_score_complete',
+        'cra_network_insights',
+      ]);
+      expect(isInstantCraOnly(instantLeaves)).toBe(true);
+      expect(mergeNewCraLinkParams(instantLeaves)).toBeNull();
+      expect(
+        applyNewCraLinkBody({ user: { client_user_id: 'flash_user_1' }, products: [] }, instantLeaves)
+      ).toEqual({ user: { client_user_id: 'flash_user_1' }, products: [] });
+
+      // Base Report, Home Lending, and Income are not Instant Link products.
+      for (const id of [
+        'cra-report-base',
+        'cra-report-home-lending',
+        'cra-report-income-insights',
+        'cra-report-income-complete',
+      ]) {
+        expect(getProductConfigById(id)?.instantCra).toBeFalsy();
+        expect(craReportGetRequiresReportId(getProductConfigById(id)!)).toBe(true);
+      }
+
+      const userCreate = buildUserCreateConfig({
+        client_user_id: 'flash_user_instant',
+        includeCraIdentity: true,
+        useLegacyUserToken: false,
+      });
+      expect(userCreate.identity.phone_numbers).toEqual([{ data: '+14155550011', primary: true }]);
+      expect(userCreate.consumer_report_user_identity).toBeUndefined();
+
+      for (const leaf of instantLeaves) {
+        expect(leaf.requiresWebhook).toBe(false);
+        expect(leaf.additionalLinkParams).toBeUndefined();
+        expect(leaf.layerTemplateId).toBeUndefined();
+        expect(craReportGetRequiresReportId(leaf)).toBe(false);
+
+        const body = buildCraReportGetRequest(leaf, 'usr_9nSp2KuZ2x4JDw');
+        expect(body.report_id).toBeUndefined();
+        expect(body.user_id).toBe('usr_9nSp2KuZ2x4JDw');
+        expect(body.scope).toBe('PLAID_NETWORK');
+        expect(body.decision_stage).toBe('DECISIONING');
+        expect(body.consumer_report_permissible_purpose).toBe('EXTENSION_OF_CREDIT');
+        expect(body.webhook).toBeUndefined();
+        expect(body.client_report_id).toBeUndefined();
+        expect(body.cra_report_parameter).toBeUndefined();
+        expect(body.products).toEqual(leaf.additionalApiParams?.products);
+      }
+
+      expect(buildCraReportGetRequest(getProductConfigById('cra-instant-lend-score')!, 'usr_1').products).toEqual([
+        { product: 'cra_lend_score', version: 'V2', options: { variants: ['GENERALIST'] } },
+      ]);
+      expect(buildCraReportGetRequest(getProductConfigById('cra-instant-cashflow-insights')!, 'usr_1').products).toEqual([
+        { product: 'cra_cashflow_insights', version: 'V2' },
+      ]);
+      expect(buildCraReportGetRequest(getProductConfigById('cra-instant-network-insights')!, 'usr_1').products).toEqual([
+        { product: 'cra_network_insights', version: 'V2' },
+      ]);
+      expect(buildCraReportGetRequest(getProductConfigById('cra-instant-lend-score-complete')!, 'usr_1').products).toEqual([
+        { product: 'cra_lend_score_complete', version: 'V1', options: { variants: ['GENERALIST'] } },
+      ]);
+    });
+
+    it('requires a report_id on CLIENT_USER /cra/report/get and omits product options', () => {
+      const income = getProductConfigById('cra-report-income-insights')!;
+      const lendScore = getProductConfigById('cra-report-lend-score')!;
+      const instant = getProductConfigById('cra-instant-lend-score')!;
+      expect(craReportGetRequiresReportId(income)).toBe(true);
+      expect(craReportGetRequiresReportId(instant)).toBe(false);
+
+      const body = applyClientUserReportId(
+        {
+          user_id: 'usr_123',
+          ...lendScore.additionalApiParams,
+        },
+        'cra-report-test'
+      );
+      expect(body.report_id).toBe('cra-report-test');
+      expect(body.products).toEqual([{ product: 'cra_lend_score', version: 'V2' }]);
+      expect(body.scope).toBe('CLIENT_USER');
+    });
+
+    it('stamps a client_report_id and strips legacy Link fields', () => {
+      const base = getProductConfigById('cra-report-base')!;
+      const income = getProductConfigById('cra-report-income-insights')!;
+      const body = applyNewCraLinkBody(
+        {
+          user: { client_user_id: 'flash_user_1' },
+          user_token: 'user-token',
+          cra_options: { days_requested: 30 },
+          products: ['cra_base_report', 'cra_income_insights'],
+        },
+        [base, income],
+        'flash-test-report'
+      );
+      expect(body.user).toBeUndefined();
+      expect(body.user_token).toBeUndefined();
+      expect(body.cra_options).toBeUndefined();
+      expect(body.cra_report_parameter).toEqual({
+        scope: 'CLIENT_USER',
+        decision_stage: 'DECISIONING',
+        days_requested: 365,
+        client_report_id: 'flash-test-report',
+        products: [
+          { product: 'cra_base_report', version: 'V1' },
+          { product: 'cra_income_insights', version: 'V2' },
+        ],
+      });
+      expect(body.consumer_report_permissible_purpose).toBe('EXTENSION_OF_CREDIT');
+    });
+
+    it('swaps which CRA children the panel renders', () => {
+      const legacyPanel = productsForCraMode(true).find((cfg) => cfg.id === 'cra')!;
+      const newPanel = productsForCraMode(false).find((cfg) => cfg.id === 'cra')!;
+      expect(legacyPanel.children!.some((child) => child.id === 'cra-base-report')).toBe(true);
+      expect(legacyPanel.children!.some((child) => child.id === 'cra-report-base')).toBe(false);
+      expect(newPanel.children!.some((child) => child.id === 'cra-report-base')).toBe(true);
+      expect(newPanel.children!.some((child) => child.id === 'cra-base-report')).toBe(false);
     });
   });
 });

@@ -3702,13 +3702,13 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   line-height: 1.2;
 }
 
-.wizard-pill:hover:not(:disabled) {
+.wizard-pill:hover:not(:disabled):not(.wizard-pill--disabled) {
   border-color: var(--border-strong);
   color: var(--text-primary);
   transform: translateY(-1px);
 }
 
-.wizard-pill:active:not(:disabled) {
+.wizard-pill:active:not(:disabled):not(.wizard-pill--disabled) {
   transform: translateY(0);
 }
 
@@ -3717,7 +3717,7 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   outline-offset: 2px;
 }
 
-.wizard-pill--clickable:hover:not(:disabled) {
+.wizard-pill--clickable:hover:not(:disabled):not(.wizard-pill--disabled) {
   box-shadow: var(--shadow-card);
 }
 
@@ -3743,7 +3743,7 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   padding: 4.5px 9.5px;
 }
 
-.wizard-pill--selected:hover:not(:disabled) {
+.wizard-pill--selected:hover:not(:disabled):not(.wizard-pill--disabled) {
   border-color: var(--text-primary);
 }
 
@@ -3752,6 +3752,24 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   opacity: 0.4;
   cursor: not-allowed;
   transform: none;
+}
+
+.wizard-pill-tooltip {
+  position: fixed;
+  z-index: 10000;
+  transform: translate(-50%, calc(-100% - 8px));
+  max-width: 240px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--tooltip-shadow);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
 }
 
 /* When a pill is disabled it should always render as unchecked, even if its

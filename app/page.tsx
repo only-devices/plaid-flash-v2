@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
+import { ensurePlaidLinkScript } from '@/lib/plaidLinkScript';
+
+ensurePlaidLinkScript();
 import Image from 'next/image';
 import Modal from '@/components/Modal';
 import ProductWizard, { WizardCard, WizardPill, WizardSubgroup } from '@/components/ProductWizard';
@@ -12,7 +15,7 @@ import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
-import { PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct } from '@/lib/productConfig';
+import { getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, collectConfigIds, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN, applyNewCraLinkBody, isInstantCraOnly, craReportProductsFromLeaf, craReportGetRequiresReportId, craReportProductKey, buildCraReportCreateRequest, buildCraReportGetRequest, applyClientUserReportId } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 import { extractPublicTokensFromLinkTokenGet } from '@/lib/linkTokenGetPublicTokens';
 import {
@@ -105,6 +108,8 @@ export default function Home() {
   const [selectedGrandchildProduct, setSelectedGrandchildProduct] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const accessTokenRef = useRef<string | null>(null);
+  // CLIENT_USER /cra/report/get needs the report_id returned by /cra/report/create.
+  const craReportIdRef = useRef<{ userId: string; productKey: string; reportId: string } | null>(null);
   const [clientUserId, setClientUserId] = useState<string | null>(null);
   const [multiItemAccessTokens, setMultiItemAccessTokens] = useState<MultiItemAccessTokenInfo[]>([]);
   const [activeMultiItemAccessTokenIndex, setActiveMultiItemAccessTokenIndex] = useState<number>(0);
@@ -117,6 +122,7 @@ export default function Home() {
     | 'layer-processing-session-get'
     | 'layer-processing-user-update'
     | 'layer-processing-check-report-create'
+    | 'cra-report-creating'
     | 'layer-processing-identity-match'
     | 'layer-identity-match-results'
     | 'preview-user-create'
@@ -193,6 +199,8 @@ export default function Home() {
   const [tempAutoRemoveEnabled, setTempAutoRemoveEnabled] = useState(true);
   const [useLegacyUserToken, setUseLegacyUserToken] = useState(false);
   const [tempUseLegacyUserToken, setTempUseLegacyUserToken] = useState(false);
+  const [legacyCra, setLegacyCra] = useState(false);
+  const [tempLegacyCra, setTempLegacyCra] = useState(false);
   const [useAltCredentials, setUseAltCredentials] = useState(false);
   const [tempUseAltCredentials, setTempUseAltCredentials] = useState(false);
   const [altCredentialsAvailable, setAltCredentialsAvailable] = useState(false);
@@ -254,6 +262,8 @@ export default function Home() {
     userId: string;
     webhook: string;
     productsToCreate: string[];
+    craApi?: 'legacy' | 'report';
+    reportProducts?: Array<Record<string, unknown>>;
   }>(null);
 
   // Product API Preview state
@@ -399,6 +409,7 @@ export default function Home() {
     hostedLinkEnabled ||
     !autoRemoveEnabled ||
     useLegacyUserToken ||
+    legacyCra ||
     useAltCredentials ||
     !includePhoneNumber ||
     bypassLink ||
@@ -414,9 +425,9 @@ export default function Home() {
         cfg.children.forEach(visit);
       }
     };
-    PRODUCTS_ARRAY.forEach(visit);
+    productsForCraMode(legacyCra).forEach(visit);
     return leafs;
-  }, []);
+  }, [legacyCra]);
 
   const layerFlowEnabled = layerMode || layerIdentityMatchEnabled;
 
@@ -492,7 +503,7 @@ export default function Home() {
       };
     };
 
-    return PRODUCTS_ARRAY
+    return productsForCraMode(legacyCra)
       .filter((p) => !isLinkLike(p.id))
       .map((parent) => {
         const directPills: WizardPill[] = [];
@@ -542,7 +553,7 @@ export default function Home() {
           bottomPills,
         };
       });
-  }, [demoProductsVisibility, getProductDisableInfo, layerFlowEnabled]);
+  }, [demoProductsVisibility, getProductDisableInfo, layerFlowEnabled, legacyCra]);
 
   // Pre-Link picker. PDF companions share a Link flow with their report
   // product, so they stay off this screen.
@@ -724,7 +735,7 @@ export default function Home() {
   // API code paths (which key off selectedProduct/Child/Grandchild) keep
   // working when the wizard's "pick" mode hands us a leaf id.
   const setSelectionForLeaf = (leafId: string) => {
-    for (const top of PRODUCTS_ARRAY) {
+    for (const top of productsForCraMode(legacyCra)) {
       if (top.id === leafId) {
         setSelectedProduct(leafId);
         setSelectedChildProduct(null);
@@ -979,6 +990,12 @@ export default function Home() {
       return;
     }
 
+    // Instant Link retrieves a PLAID_NETWORK report and never opens Link or Layer.
+    if (productConfig.instantCra) {
+      showUserCreatePreview(productId);
+      return;
+    }
+
     // Layer flow: use /session/token/create + submit-driven eligibility
     if (layerMode) {
       if (!effectiveWebhookConfigUrl) {
@@ -1122,6 +1139,88 @@ export default function Home() {
     }
   };
 
+  const openCraReportPreview = async (productConfig: ProductConfig, userIdValue: string | null) => {
+    if (!userIdValue) {
+      setErrorData({
+        error: 'MISSING_USER',
+        message: 'Missing user_id for CRA report fetch.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+
+    let requestBody = buildCraReportGetRequest(productConfig, userIdValue);
+
+    // CLIENT_USER reports are generated asynchronously. /cra/report/get rejects
+    // the call unless report_id from /cra/report/create (or CRA_REPORT_READY) is set.
+    // Instant Link (PLAID_NETWORK) is synchronous and must omit report_id.
+    if (craReportGetRequiresReportId(productConfig)) {
+      const products = craReportProductsFromLeaf(productConfig);
+      const productKey = craReportProductKey(products);
+      const cached = craReportIdRef.current;
+      let reportId =
+        cached && cached.userId === userIdValue && cached.productKey === productKey
+          ? cached.reportId
+          : '';
+
+      if (!reportId) {
+        setModalState('cra-report-creating');
+        setShowModal(true);
+        try {
+          const createResp = await fetch('/api/cra-report-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              buildCraReportCreateRequest({
+                userId: userIdValue,
+                products,
+                webhook: effectiveWebhookConfigUrl,
+              })
+            ),
+          });
+          const createJson = await createResp.json();
+          if (createResp.status >= 400) {
+            setErrorData(createJson);
+            setApiStatusCode(createResp.status);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+          reportId = typeof createJson?.report_id === 'string' ? createJson.report_id : '';
+          if (!reportId) {
+            setErrorData({
+              error: 'MISSING_REPORT_ID',
+              message: '/cra/report/create did not return a report_id.',
+              response: createJson,
+            });
+            setApiStatusCode(createResp.status || 500);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+          craReportIdRef.current = { userId: userIdValue, productKey, reportId };
+        } catch (error: any) {
+          setErrorData({
+            error: 'CRA_REPORT_CREATE_FAILED',
+            message: error?.message || 'Failed to create the Consumer Report.',
+          });
+          setApiStatusCode(500);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+      }
+
+      requestBody = applyClientUserReportId(requestBody, reportId);
+    }
+
+    setProductApiConfig(requestBody);
+    setModalState('preview-product-api');
+    setShowModal(true);
+  };
+
   const showUserCreatePreview = (productId: string) => {
     const productConfig = getProductConfigById(productId);
     if (!productConfig) {
@@ -1142,7 +1241,8 @@ export default function Home() {
 
     const userConfig = buildUserCreateConfig({
       client_user_id,
-      useLegacyUserToken,
+      // New /cra/report/* users always use the identity schema and user_id.
+      useLegacyUserToken: productConfig.craApi === 'report' ? false : useLegacyUserToken,
       includeCraIdentity,
     });
 
@@ -1179,6 +1279,7 @@ export default function Home() {
       const productConfig = getProductConfigById(effectiveProductId!);
       const isUpgradeMode = effectiveProductId === 'link-upgrade-mode';
       const isNonCraMultiItemUserCreate = multiItemLinkEnabled && !productConfig?.isCRA;
+      const reportApiUser = productConfig?.craApi === 'report';
 
       // Submit the modal JSON as-is. Do not strip identity based on the
       // currently selected product — Demo Mode often has selectedProduct
@@ -1225,8 +1326,8 @@ export default function Home() {
         setUserId(newUserId);
         setUserToken(null);
         setUsedUserToken(false);
-      } else if (useLegacyUserToken) {
-        // Legacy mode: only store user_token
+      } else if (useLegacyUserToken && !reportApiUser) {
+        // Legacy mode: only store user_token. New CRA ignores this toggle.
         setUserId(null);
         setUserToken(newUserToken);
         setUsedUserToken(true);
@@ -1279,6 +1380,24 @@ export default function Home() {
         return;
       }
 
+      // Instant Link: /user/create then /cra/report/get. No Link token and no sandbox item.
+      // A pending Link or sandbox config means this user was created for a mixed
+      // selection, so continue into that flow and leave Instant Link for the picker.
+      if (productConfig?.instantCra && !demoPendingLinkTokenConfig && !demoPendingSandboxConfig) {
+        const instantLeaves = resolveSelectedLinkProducts().selectedLeafConfigs.filter((leaf) => leaf.instantCra);
+        setIsDemoModeStarting(false);
+        setDemoPendingLinkTokenConfig(null);
+        setDemoPendingSandboxConfig(null);
+        if (instantLeaves.length > 1) {
+          setDemoLinkCompleted(true);
+          setShowModal(false);
+          setShowProductModal(true);
+          return;
+        }
+        openCraReportPreview(productConfig, newUserId);
+        return;
+      }
+
       // Demo Mode + Bypass Link bootstrap: after /user/create, attach the
       // user_id/user_token to the pending sandbox config and proceed with
       // /sandbox/public_token/create instead of /link/token/create.
@@ -1290,7 +1409,13 @@ export default function Home() {
           setClientUserId(userCreateClientUserId);
         }
 
-        if (useLegacyUserToken && newUserToken) {
+        if (reportApiUser) {
+          delete pendingSandbox.user_token;
+          if (newUserId) {
+            pendingSandbox.user_id = newUserId;
+            setUsedUserToken(false);
+          }
+        } else if (useLegacyUserToken && newUserToken) {
           pendingSandbox.user_token = newUserToken;
           setUsedUserToken(true);
         } else if (newUserId) {
@@ -1323,8 +1448,16 @@ export default function Home() {
           setClientUserId(userCreateClientUserId);
         }
 
-        // Add user_id or user_token based on legacy toggle
-        if (useLegacyUserToken && newUserToken) {
+        // New CRA sends user_id only: no user object, user_token, or cra_options.
+        if (pendingCfg.cra_report_parameter) {
+          delete pendingCfg.user;
+          delete pendingCfg.user_token;
+          delete pendingCfg.cra_options;
+          if (newUserId) {
+            pendingCfg.user_id = newUserId;
+            setUsedUserToken(false);
+          }
+        } else if (useLegacyUserToken && newUserToken) {
           pendingCfg.user_token = newUserToken;
           setUsedUserToken(true);
         } else if (newUserId) {
@@ -1417,6 +1550,11 @@ export default function Home() {
     const effectiveUserId = userIdParam ?? userId;
     const effectiveUserToken = userTokenParam ?? userToken;
 
+    if (productConfig.instantCra) {
+      openCraReportPreview(productConfig, effectiveUserId);
+      return;
+    }
+
     // Bypass Link mode for CRA products: build sandbox config instead
     if (bypassLink) {
       const sandboxFullConfig: any = {
@@ -1447,8 +1585,13 @@ export default function Home() {
         sandboxFullConfig.options.webhook = effectiveWebhookConfigUrl;
       }
 
-      // Add user_id or user_token for CRA products
-      if (useLegacyUserToken && effectiveUserToken) {
+      // Add user_id or user_token for CRA products. New CRA is user_id only.
+      if (productConfig.craApi === 'report') {
+        if (effectiveUserId) {
+          sandboxFullConfig.user_id = effectiveUserId;
+          setUsedUserToken(false);
+        }
+      } else if (useLegacyUserToken && effectiveUserToken) {
         sandboxFullConfig.user_token = effectiveUserToken;
         setUsedUserToken(true);
       } else if (effectiveUserId) {
@@ -1535,7 +1678,16 @@ export default function Home() {
       fullConfig.webhook = effectiveWebhookConfigUrl;
     }
 
-    setLinkTokenConfig(fullConfig);
+    let linkConfig = fullConfig;
+    if (productConfig.craApi === 'report') {
+      linkConfig = applyNewCraLinkBody(fullConfig, [productConfig]);
+      if (effectiveUserId) {
+        linkConfig.user_id = effectiveUserId;
+        setUsedUserToken(false);
+      }
+    }
+
+    setLinkTokenConfig(linkConfig);
     setModalState('preview-config');
   };
 
@@ -1757,17 +1909,29 @@ export default function Home() {
 
       setModalState('layer-processing-check-report-create');
       setShowModal(true);
-      const createResp = await fetch('/api/cra-check-report-create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: pending.userId,
-          webhook: pending.webhook,
-          days_requested: 365,
-          consumer_report_permissible_purpose: 'LEGITIMATE_BUSINESS_NEED_OTHER',
-          products: pending.productsToCreate,
-        }),
-      });
+      const reportProducts = pending.reportProducts || [];
+      const createBody =
+        pending.craApi === 'report'
+          ? buildCraReportCreateRequest({
+              userId: pending.userId,
+              products: reportProducts,
+              webhook: pending.webhook,
+            })
+          : {
+              user_id: pending.userId,
+              webhook: pending.webhook,
+              days_requested: 365,
+              consumer_report_permissible_purpose: 'LEGITIMATE_BUSINESS_NEED_OTHER',
+              products: pending.productsToCreate,
+            };
+      const createResp = await fetch(
+        pending.craApi === 'report' ? '/api/cra-report-create' : '/api/cra-check-report-create',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createBody),
+        }
+      );
       const createJson = await createResp.json();
       if (createResp.status >= 400) {
         setErrorData(createJson);
@@ -1777,9 +1941,19 @@ export default function Home() {
         return;
       }
 
+      // Keep the report_id so the following /cra/report/get includes it.
+      // CLIENT_USER rejects get without that id.
+      if (pending.craApi === 'report' && typeof createJson?.report_id === 'string' && createJson.report_id) {
+        craReportIdRef.current = {
+          userId: pending.userId,
+          productKey: craReportProductKey(reportProducts),
+          reportId: createJson.report_id,
+        };
+      }
+
       // Step D: skip the manual webhook-paste gate; jump straight to the
       // product API preview. The user is responsible for waiting until
-      // USER_CHECK_REPORT_READY arrives before clicking proceed; if Plaid
+      // CRA_REPORT_READY arrives before clicking proceed; if Plaid
       // returns an error because the report isn't ready, they can retry.
       setCraLayerPendingAfterUserUpdate(null);
       handleCraLayerReportReadyForward();
@@ -2650,6 +2824,7 @@ export default function Home() {
     setTempHostedLinkEnabled(hostedLinkEnabled);
     setTempAutoRemoveEnabled(autoRemoveEnabled);
     setTempUseLegacyUserToken(layerMode && alwaysUserCreate ? false : useLegacyUserToken);
+    setTempLegacyCra(legacyCra);
     setTempUseAltCredentials(useAltCredentials);
     setTempIncludePhoneNumber(includePhoneNumber);
     setTempAlwaysUserCreate(alwaysUserCreate);
@@ -2676,6 +2851,31 @@ export default function Home() {
     setHostedLinkEnabled(tempHostedLinkEnabled);
     setAutoRemoveEnabled(tempAutoRemoveEnabled);
     setUseLegacyUserToken(tempLayerMode && tempAlwaysUserCreate ? false : tempUseLegacyUserToken);
+    if (tempLegacyCra !== legacyCra) {
+      const activeIds = new Set(
+        collectConfigIds(tempLegacyCra ? LEGACY_CRA_CHILDREN : NEW_CRA_CHILDREN)
+      );
+      setDemoProductsVisibility((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          const cfg = getProductConfigById(id);
+          if ((cfg?.isCRA || cfg?.craApi) && !activeIds.has(id)) {
+            delete next[id];
+          }
+        }
+        return next;
+      });
+      const selectedId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      if (selectedId && !activeIds.has(selectedId)) {
+        const cfg = getProductConfigById(selectedId);
+        if (cfg?.isCRA || cfg?.craApi) {
+          setSelectedProduct(null);
+          setSelectedChildProduct(null);
+          setSelectedGrandchildProduct(null);
+        }
+      }
+    }
+    setLegacyCra(tempLegacyCra);
     // Persist Plaid credential mode (cookie-backed)
     try {
       const resp = await fetch('/api/credentials-mode', {
@@ -3201,6 +3401,11 @@ export default function Home() {
             return;
           }
 
+          if (productConfig.craApi === 'report') {
+            openCraReportPreview(productConfig, userId);
+            return;
+          }
+
           if (!productConfig.apiEndpoint) {
             throw new Error('Product API endpoint not configured');
           }
@@ -3531,8 +3736,9 @@ export default function Home() {
     if (productConfig?.isCRA) {
       // CRA products: if hybrid is active, run exchange + sequential flow; otherwise keep existing CRA flow
       try {
-        // Layer + CRA: after Layer completes, persist identity via /user/update, then create a report via /cra/check_report/create.
-        if (layerMode && (layerSessionActive || isLayerProfileToken)) {
+        // Layer + CRA: after Layer completes, persist identity via /user/update, then create a report.
+        // Instant Link never goes through Layer.
+        if (layerMode && (layerSessionActive || isLayerProfileToken) && !productConfig.instantCra) {
           if (useLegacyUserToken) {
             setErrorData({
               error: 'LAYER_CRA_LEGACY_UNSUPPORTED',
@@ -3673,6 +3879,9 @@ export default function Home() {
             userId,
             webhook: effectiveWebhookConfigUrl,
             productsToCreate,
+            craApi: productConfig.craApi,
+            reportProducts:
+              productConfig.craApi === 'report' ? craReportProductsFromLeaf(productConfig) : undefined,
           });
           setModalState('preview-user-update');
           setShowModal(true);
@@ -3777,6 +3986,11 @@ export default function Home() {
           setCashflowUpdatesSelectedIndex(0);
           setModalState('cashflow-updates-pick-item');
           setShowModal(true);
+          return;
+        }
+
+        if (productConfig.craApi === 'report') {
+          openCraReportPreview(productConfig, userId);
           return;
         }
 
@@ -4425,6 +4639,7 @@ export default function Home() {
     'layer-processing-session-get',
     'layer-processing-user-update',
     'layer-processing-check-report-create',
+    'cra-report-creating',
     'layer-processing-identity-match',
     'hosted-waiting',
     'cashflow-updates-loading-items',
@@ -4680,6 +4895,8 @@ export default function Home() {
     const productsSet = new Set<string>();
     let mergedAdditionalLinkParams: Record<string, any> = {};
     for (const leaf of selectedLeafConfigs) {
+      // Instant Link leaves call /cra/report/get directly and are not Link products.
+      if (leaf.instantCra) continue;
       for (const p of Array.isArray(leaf.products) ? leaf.products : []) {
         if (typeof p === 'string' && p) productsSet.add(p);
       }
@@ -4692,7 +4909,8 @@ export default function Home() {
     }
     const products = Array.from(productsSet);
     const includesCra =
-      products.some((p) => p.startsWith('cra_')) || selectedLeafConfigs.some((c) => !!c.isCRA);
+      products.some((p) => p.startsWith('cra_')) ||
+      selectedLeafConfigs.some((c) => !!c.isCRA && !c.instantCra);
 
     return { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra };
   };
@@ -4793,6 +5011,15 @@ export default function Home() {
     const { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra } =
       resolveSelectedLinkProducts();
 
+    // Instant Link skips Link entirely: create the user, then call /cra/report/get.
+    if (isInstantCraOnly(selectedLeafConfigs)) {
+      setIsDemoModeStarting(true);
+      const leaf = selectedLeafConfigs[0];
+      setSelectionForLeaf(leaf.id);
+      showUserCreatePreview(leaf.id);
+      return;
+    }
+
     // CRA in Demo Mode requires a webhook URL (so we can wait for readiness later)
     if (includesCra && !effectiveWebhookConfigUrl) {
       setErrorData({
@@ -4816,6 +5043,7 @@ export default function Home() {
       const sandboxInitialProducts = new Set<string>();
       const mergedSandboxParams: Record<string, any> = { options: {} };
       for (const leaf of selectedLeafConfigs) {
+        if (leaf.instantCra) continue;
         const leafSandboxProducts = leaf.sandboxProducts || leaf.products || [];
         for (const p of leafSandboxProducts) {
           if (typeof p === 'string' && p) sandboxInitialProducts.add(p);
@@ -4846,12 +5074,15 @@ export default function Home() {
 
       setIsDemoModeStarting(true);
 
-      if (includesCra || alwaysUserCreate) {
+      if (includesCra || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
         // /user/create first so we can include user_id/user_token in the
         // sandbox config. The sandbox preview modal opens from
         // handleProceedWithUserCreate's demoPendingSandboxConfig branch.
         setDemoPendingSandboxConfig(sandboxFullConfig);
-        const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
+        const leafForUserCreate =
+          selectedLeafConfigs.find((c) => c.isCRA && !c.instantCra) ||
+          selectedLeafConfigs.find((c) => c.instantCra) ||
+          selectedLeafConfigs[0];
         const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
         setSelectionForLeaf(productIdForUserCreate);
         showUserCreatePreview(productIdForUserCreate);
@@ -4870,7 +5101,7 @@ export default function Home() {
 
     const demoClientUserId = generateClientUserId();
     setClientUserId(demoClientUserId);
-    const demoConfig: any = {
+    let demoConfig: any = {
       link_customization_name: 'flash',
       user: includePhoneNumber
         ? { client_user_id: demoClientUserId, phone_number: '+14155550011' }
@@ -4886,8 +5117,10 @@ export default function Home() {
       demoConfig.transactions = { days_requested: 14 };
     }
 
-    // Merge any per-product additional link params (e.g., CRA permissible purpose)
+    // Merge any per-product additional link params (e.g., CRA permissible purpose).
+    // New CRA replaces cra_options with cra_report_parameter and omits `user`.
     Object.assign(demoConfig, mergedAdditionalLinkParams);
+    demoConfig = applyNewCraLinkBody(demoConfig, selectedLeafConfigs);
 
     // Include webhook URL when set
     if (effectiveWebhookConfigUrl) {
@@ -4905,9 +5138,12 @@ export default function Home() {
     // Set flag that we're starting demo mode
     setIsDemoModeStarting(true);
 
-    if (includesCra || alwaysUserCreate) {
+    if (includesCra || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
       // /user/create first so we can include user_id/user_token in /link/token/create
-      const leafForUserCreate = selectedLeafConfigs.find((c) => c.isCRA) || selectedLeafConfigs[0];
+      const leafForUserCreate =
+        selectedLeafConfigs.find((c) => c.isCRA && !c.instantCra) ||
+        selectedLeafConfigs.find((c) => c.instantCra) ||
+        selectedLeafConfigs[0];
       const productIdForUserCreate = leafForUserCreate?.id || 'cra-base-report';
       setSelectionForLeaf(productIdForUserCreate);
       setDemoPendingSandboxConfig(null);
@@ -5433,6 +5669,10 @@ export default function Home() {
 
       // CRA products still use user_id/user_token downstream
       if (productConfig.isCRA) {
+        if (productConfig.craApi === 'report') {
+          openCraReportPreview(productConfig, userId);
+          return;
+        }
         const baseParams: any = {};
         if (usedUserToken && userToken) {
           baseParams.user_token = userToken;
@@ -5738,6 +5978,10 @@ export default function Home() {
 
       // CRA-only: proceed with CRA flow (no token exchange required)
       if (productConfig?.isCRA) {
+        if (productConfig.craApi === 'report') {
+          openCraReportPreview(productConfig, userId);
+          return;
+        }
         if (!productConfig.apiEndpoint) {
           throw new Error('Product API endpoint not configured');
         }
@@ -5777,7 +6021,13 @@ export default function Home() {
     // Match the param used at /link/token/create. Layer + CRA always sets
     // user_id upstream (legacy user_token is blocked for Layer), but the
     // wizard picker path also routes non-Layer CRA flows here, where
-    // legacy user_token is valid and userId is null.
+    // legacy user_token is valid and userId is null. New /cra/report/* calls
+    // accept user_id only.
+    if (productConfig.craApi === 'report') {
+      openCraReportPreview(productConfig, userId);
+      return;
+    }
+
     const baseParams: any = {};
     if (usedUserToken && userToken) {
       baseParams.user_token = userToken;
@@ -6490,9 +6740,9 @@ export default function Home() {
       );
     }
 
-    if (modalState === 'layer-processing-check-report-create') {
+    if (modalState === 'layer-processing-check-report-create' || modalState === 'cra-report-creating') {
       return (
-        <LoadingModalBody message="Creating CRA check report..." />
+        <LoadingModalBody message="Creating the Consumer Report..." />
       );
     }
 
@@ -7828,6 +8078,11 @@ export default function Home() {
                           ? 'Layer is not compatible with user_token'
                           : undefined
                       }
+                    />
+                    <SettingsPill
+                      label="Legacy CRA"
+                      checked={tempLegacyCra}
+                      onChange={() => setTempLegacyCra(!tempLegacyCra)}
                     />
                     <SettingsPill
                       label="Auto-remove items & users"

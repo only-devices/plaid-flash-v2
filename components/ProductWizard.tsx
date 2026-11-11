@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface WizardPill {
   id: string;
@@ -61,6 +62,7 @@ const ProductWizard: React.FC<ProductWizardProps> = ({
   hasCustomSettings = false,
   onResetClick,
 }) => {
+  const [hoverTip, setHoverTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const resolvedTitle =
     title ?? (mode === 'select' ? 'Choose your products' : 'Pick a product to test');
   const resolvedSubtitle =
@@ -112,6 +114,18 @@ const ProductWizard: React.FC<ProductWizardProps> = ({
         </button>
       )}
 
+      {hoverTip &&
+        createPortal(
+          <div
+            className="wizard-pill-tooltip"
+            style={{ left: hoverTip.x, top: hoverTip.y }}
+            role="tooltip"
+          >
+            {hoverTip.text}
+          </div>,
+          document.body
+        )}
+
       <div className="product-wizard-header">
         <h2 className="product-wizard-title">{resolvedTitle}</h2>
         {resolvedSubtitle && <p className="product-wizard-subtitle">{resolvedSubtitle}</p>}
@@ -136,9 +150,33 @@ const ProductWizard: React.FC<ProductWizardProps> = ({
                 type="button"
                 key={pill.id}
                 className={className}
-                onClick={() => !isDisabled && onPillClick(pill.id)}
-                disabled={isDisabled}
-                title={isDisabled ? pill.disabledReason : undefined}
+                onClick={() => {
+                  if (isDisabled) return;
+                  onPillClick(pill.id);
+                }}
+                onMouseEnter={(event) => {
+                  if (!isDisabled || !pill.disabledReason) return;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setHoverTip({
+                    text: pill.disabledReason,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top,
+                  });
+                }}
+                onMouseLeave={() => setHoverTip(null)}
+                onFocus={(event) => {
+                  if (!isDisabled || !pill.disabledReason) return;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setHoverTip({
+                    text: pill.disabledReason,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top,
+                  });
+                }}
+                onBlur={() => setHoverTip(null)}
+                // A real disabled attribute swallows hover, so the reason never appears.
+                // No title attribute: the browser draws its own tooltip on top of the custom one.
+                aria-disabled={isDisabled || undefined}
                 aria-pressed={mode === 'select' ? isSelected : undefined}
               >
                 {mode === 'select' && (

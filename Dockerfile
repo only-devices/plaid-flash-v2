@@ -1,4 +1,4 @@
-FROM node:20-alpine3.20
+FROM node:24-alpine3.24
 
 # Apply security updates and install runtime dependency
 RUN apk update && apk upgrade --no-cache && apk add --no-cache libc6-compat
