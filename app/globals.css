@@ -3502,11 +3502,13 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
 
 /* Widen the standard Modal whenever it's wrapping either the Configuration
    Wizard or the (also card-based) Settings modal. Both layouts need more
-   horizontal room than the typical 850px-wide preview/result modals so a
-   3-card grid can fit. */
-.modal:has(.product-wizard),
+   horizontal room than the typical 850px-wide preview/result modals. */
 .modal:has(.settings-modal) {
   max-width: 1100px;
+  width: 96%;
+}
+.modal:has(.product-wizard) {
+  max-width: 1280px;
   width: 96%;
 }
 .modal:has(.product-wizard) .modal-content,
@@ -3561,6 +3563,10 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   padding: 2px 6px 2px 2px;
   align-content: start;
   animation: fadeIn 0.6s ease-out 0.15s backwards;
+}
+
+.product-wizard .wizard-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .wizard-card {
@@ -3923,7 +3929,8 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
 
 /* Tablet: 2 columns */
 @media (max-width: 960px) {
-  .wizard-grid {
+  .wizard-grid,
+  .product-wizard .wizard-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -3944,7 +3951,8 @@ body:has(.event-logs-container.visible) .embedded-link-container.ready {
   .product-wizard-title {
     font-size: 18px;
   }
-  .wizard-grid {
+  .wizard-grid,
+  .product-wizard .wizard-grid {
     grid-template-columns: 1fr;
     gap: 12px;
   }

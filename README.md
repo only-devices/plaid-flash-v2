@@ -58,7 +58,7 @@ docker compose down -v # Stops and removes Docker container
 
 ### Configuration Wizard
 
-The app opens directly into the **Configuration Wizard** after the welcome animation. The wizard is a single screen with three cards (**Payments and Funding**, **Personal Finance Insights**, **CRA**); each card lists its leaf products as toggleable buttons, optionally grouped by sub-category (e.g. CRA → Income → Income Insights). Pick every product you want to test in the session, then click **Start**.
+The app opens directly into the **Configuration Wizard** after the welcome animation. The wizard is a single screen with four cards (**Payments and Funding**, **Personal Finance Insights**, **Income**, **CRA**); each card lists its leaf products as toggleable buttons, optionally grouped by sub-category (e.g. CRA → Income → Income Insights). Pick every product you want to test in the session, then click **Start**.
 
 Once Link completes, the wizard re-appears in **picker** mode showing only the products you selected — clicking a button runs that product's API against the access_token from your Link session. You can run multiple products back-to-back without re-running Link.
 
@@ -71,6 +71,22 @@ The settings gear (top-right of the wizard) opens the Settings modal; the reset 
 3. Complete Link.
 4. Exchange `public_token` → `access_token`.
 5. The wizard re-opens in picker mode — click any selected button to call `/accounts/get` (where applicable) and then that product's endpoint.
+
+### Income flow (Payroll, Bank, and Document)
+
+Income uses one Plaid user across every source. Payroll and Document Income share a Link session (`income_source_types: ["payroll"]`). Bank Income is a separate session (`income_source_types: ["bank"]`, `days_requested: 180`) and can be combined with other Item products such as Auth. None of these can be combined with CRA.
+
+1. Set a **Webhook URL** in Settings. Income pills stay disabled until one is set.
+2. Select **Payroll**, **Bank**, and/or **Document**, then click **Start**.
+3. `/user/create` runs with `client_user_id` only (no CRA identity). The same user is reused for every Income source.
+4. `/link/token/create` sends `products: ["income_verification"]` and the source-specific `income_verification` block. A `usr_` id from `/user/create` is sent as `user_id`. If `/user/create` still returns a `user_token` (older user API), that token is sent instead. The legacy user token toggle forces `user_token`.
+5. Complete Link. `onSuccess` does not mean the report is ready.
+6. After the Income webhook, pick the result call:
+   - Payroll → `/credit/payroll_income/get` (Employment → `/credit/employment/get` is available on the same session)
+   - Bank → `/credit/bank_income/get`
+   - Document → `/credit/sessions/get`, then Parsed Documents (`/credit/payroll_income/get`), Bank Statements (`/credit/bank_statements/uploads/get`), or Risk Signals (`/credit/payroll_income/risk_signals/get`)
+
+Document uploads happen inside Link. Accepted document types are set in the [Link customization](https://dashboard.plaid.com/link/manualVerificationOfIncomeUpload). Bypass Link cannot upload documents. Payroll Bypass Link uses Sandbox institution `ins_135842` and does not exchange the public token; `/credit/payroll_income/get` uses the `user_id`.
 
 ### CRA flow (Plaid Check / Consumer Report)
 
@@ -144,6 +160,12 @@ Product definitions live in `lib/productConfig.ts`. Leaf products below include 
   - Investments Transactions → `/investments/transactions/get`
 - **Liabilities** → `/liabilities/get`
 
+### Income
+
+- **Payroll** → `/credit/payroll_income/get` (Employment → `/credit/employment/get` after the same Link session)
+- **Bank** → `/credit/bank_income/get`
+- **Document** → `/credit/sessions/get`, then Parsed Documents (`/credit/payroll_income/get`), Bank Statements (`/credit/bank_statements/uploads/get`), and Risk Signals (`/credit/payroll_income/risk_signals/get`)
+
 ### CRA
 
 - Base Report → `/cra/check_report/base_report/get`
@@ -186,7 +208,7 @@ Other Link-card settings:
 
 ## Webhooks
 
-Several features (CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. For Hosted Link, finish the session in the other tab, then continue so the app can read public tokens from `/link/token/get`; for CRA flows, you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed on the product API preview when it arrives.
+Several features (Income, CRA products, Upgrade Mode, Hosted Link, Multi-item Link, Layer) require a webhook URL. Set your **Webhook URL** in Settings to a publicly reachable endpoint that can receive Plaid webhooks; buttons that need one will be disabled in the wizard until it's set. For Hosted Link, finish the session in the other tab, then continue so the app can read public tokens from `/link/token/get`; for CRA flows, you wait for `USER_CHECK_REPORT_READY` out-of-band and click proceed on the product API preview when it arrives.
 
 ## Testing
 

@@ -1,4 +1,4 @@
-import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, applyNewCraLinkBody, applyClientUserReportId, buildCraReportGetRequest, craReportGetRequiresReportId, isInstantCraOnly, mergeNewCraLinkParams, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN } from '@/lib/productConfig';
+import { PRODUCT_CONFIGS, PRODUCTS_ARRAY, getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, applyNewCraLinkBody, applyClientUserReportId, buildCraReportGetRequest, craReportGetRequiresReportId, isInstantCraOnly, mergeNewCraLinkParams, incomeVerificationForLeaves, incomeSelectionConflict, incomeUserIdentifier, userIdentifierParams, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN } from '@/lib/productConfig';
 import { buildUserCreateConfig } from '@/lib/userCreateIdentity';
 
 describe('productConfig', () => {
@@ -6,6 +6,7 @@ describe('productConfig', () => {
     it('contains the expected top-level product categories', () => {
       expect(PRODUCT_CONFIGS).toHaveProperty('payments');
       expect(PRODUCT_CONFIGS).toHaveProperty('personal_finance_insights');
+      expect(PRODUCT_CONFIGS).toHaveProperty('income');
       expect(PRODUCT_CONFIGS).toHaveProperty('cra');
       expect(PRODUCT_CONFIGS).toHaveProperty('link');
     });
@@ -105,6 +106,7 @@ describe('productConfig', () => {
       const ids = PRODUCTS_ARRAY.map(p => p.id);
       expect(ids).toContain('payments');
       expect(ids).toContain('personal_finance_insights');
+      expect(ids).toContain('income');
       expect(ids).toContain('cra');
       expect(ids).toContain('link');
     });
@@ -229,10 +231,12 @@ describe('productConfig', () => {
       ]);
     });
 
-    it('rejects CRA, Enrich, and leaves without an API', () => {
+    it('rejects CRA, Enrich, Income, and leaves without an API', () => {
       expect(isNonCraAccessTokenProduct(getProductConfigById('cra-base-report'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('cra-report-base'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('transactions-enrich'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('payroll-income'))).toBe(false);
+      expect(isNonCraAccessTokenProduct(getProductConfigById('bank-income'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('link-upgrade-mode'))).toBe(false);
       expect(isNonCraAccessTokenProduct(getProductConfigById('link-update-mode'))).toBe(false);
     });
@@ -410,7 +414,115 @@ describe('productConfig', () => {
       });
       expect(body.consumer_report_permissible_purpose).toBe('EXTENSION_OF_CREDIT');
     });
+  });
 
+  describe('Income', () => {
+    it('exposes Payroll, Bank, and Document with user-scoped result calls', () => {
+      const payroll = getProductConfigById('payroll-income')!;
+      const bank = getProductConfigById('bank-income')!;
+      const document = getProductConfigById('document-income')!;
+
+      expect(payroll.products).toEqual(['income_verification']);
+      expect(payroll.usesUserId).toBe(true);
+      expect(payroll.requiresWebhook).toBe(true);
+      expect(payroll.apiEndpoint).toBe('/api/credit-payroll-income-get');
+      expect(payroll.additionalLinkParams).toEqual({
+        income_verification: {
+          income_source_types: ['payroll'],
+          payroll_income: { flow_types: ['payroll_digital_income'] },
+        },
+      });
+      expect(payroll.additionalSandboxCreateParams).toEqual({ institution_id: 'ins_135842' });
+
+      expect(bank.additionalLinkParams).toEqual({
+        income_verification: {
+          income_source_types: ['bank'],
+          bank_income: { days_requested: 180 },
+        },
+      });
+      expect(bank.additionalApiParams).toEqual({ options: { count: 1 } });
+      expect(bank.apiTitle).toBe('/credit/bank_income/get');
+
+      expect(document.apiTitle).toBe('/credit/sessions/get');
+      expect(document.additionalLinkParams).toEqual({
+        income_verification: {
+          income_source_types: ['payroll'],
+          payroll_income: {
+            flow_types: ['payroll_document_income'],
+            parsing_config: ['ocr', 'risk_signals'],
+          },
+        },
+      });
+      expect(getProductConfigById('document-payroll-income')?.postLinkCompanionOf).toBe('document-income');
+      expect(getProductConfigById('document-bank-statements')?.apiTitle).toBe('/credit/bank_statements/uploads/get');
+      expect(getProductConfigById('document-risk-signals')?.apiTitle).toBe('/credit/payroll_income/risk_signals/get');
+      expect(getProductConfigById('payroll-employment')?.postLinkCompanionOf).toBe('payroll-income');
+      expect(getProductConfigById('payroll-employment')?.hideFromLanding).toBe(true);
+    });
+
+    it('merges Payroll and Document into one payroll Link session', () => {
+      const merged = incomeVerificationForLeaves([
+        getProductConfigById('payroll-income')!,
+        getProductConfigById('document-income')!,
+      ]);
+      expect(merged).toEqual({
+        income_verification: {
+          income_source_types: ['payroll'],
+          payroll_income: {
+            flow_types: ['payroll_digital_income', 'payroll_document_income'],
+            parsing_config: ['ocr', 'risk_signals'],
+          },
+        },
+      });
+      expect(
+        incomeVerificationForLeaves([
+          getProductConfigById('bank-income')!,
+          getProductConfigById('payroll-income')!,
+        ])
+      ).toBeNull();
+    });
+
+    it('keeps Bank Income compatible with Item products and blocks CRA and Payroll mixes', () => {
+      const payroll = getProductConfigById('payroll-income')!;
+      const bank = getProductConfigById('bank-income')!;
+      const auth = getProductConfigById('auth')!;
+      const cra = getProductConfigById('cra-report-base')!;
+
+      expect(incomeSelectionConflict(auth, [bank])).toBeNull();
+      expect(incomeSelectionConflict(bank, [auth])).toBeNull();
+      expect(incomeSelectionConflict(payroll, [auth])).toMatch(/only share a Link session/);
+      expect(incomeSelectionConflict(bank, [payroll])).toMatch(/own Link session/);
+      expect(incomeSelectionConflict(cra, [bank])).toMatch(/CRA cannot be combined/);
+      expect(incomeSelectionConflict(payroll, [cra])).toMatch(/cannot share a Link session with CRA/);
+      expect(incomeSelectionConflict(getProductConfigById('document-income')!, [payroll])).toBeNull();
+    });
+
+    it('uses usr_ user_id and falls back to user_token from older /user/create responses', () => {
+      expect(incomeUserIdentifier({ user_id: 'usr_123', user_token: 'user-sandbox' }, false)).toEqual({
+        userId: 'usr_123',
+        userToken: null,
+        usedUserToken: false,
+      });
+      expect(
+        incomeUserIdentifier({ user_id: 'a'.repeat(64), user_token: 'user-sandbox' }, false)
+      ).toEqual({
+        userId: null,
+        userToken: 'user-sandbox',
+        usedUserToken: true,
+      });
+    });
+
+    it('prefers user_id, then legacy user_token', () => {
+      expect(userIdentifierParams({ userId: 'usr_1', userToken: 'user-token', usedUserToken: false })).toEqual({
+        user_id: 'usr_1',
+      });
+      expect(userIdentifierParams({ userId: 'usr_1', userToken: 'user-token', usedUserToken: true })).toEqual({
+        user_token: 'user-token',
+      });
+    });
+  });
+
+  describe('CRA panel swap', () => {
     it('swaps which CRA children the panel renders', () => {
       const legacyPanel = productsForCraMode(true).find((cfg) => cfg.id === 'cra')!;
       const newPanel = productsForCraMode(false).find((cfg) => cfg.id === 'cra')!;

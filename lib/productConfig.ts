@@ -17,6 +17,8 @@ const getDateRange = () => {
   };
 };
 
+export type IncomeFlow = 'payroll' | 'bank' | 'document';
+
 export interface ProductConfig {
   id: string;
   name: string;
@@ -43,7 +45,88 @@ export interface ProductConfig {
   postLinkCompanionOf?: string; // Also offer this leaf after Link when that product id was selected
   pdfResponseKey?: string; // Key in API response holding base64 PDF (default 'pdf')
   noAccessToken?: boolean; // When true, leaf does not require Link or access_token (e.g., /transactions/enrich)
+  usesUserId?: boolean; // Retrieve with user_id/user_token (Income). Not an Item access_token call.
+  incomeFlow?: IncomeFlow; // Which Income Link session this leaf belongs to
   sampleApiBody?: Record<string, any>; // Pre-populated request body for the preview-product-api JSON editor
+}
+
+const INCOME_GRADIENT = 'linear-gradient(135deg, #4a5fc1 0%, #5a3d7a 100%)';
+const INCOME_ICON = '/icons/transactions.png';
+
+const PAYROLL_LINK_PARAMS = {
+  income_verification: {
+    income_source_types: ['payroll'],
+    payroll_income: {
+      flow_types: ['payroll_digital_income'],
+    },
+  },
+};
+
+const DOCUMENT_LINK_PARAMS = {
+  income_verification: {
+    income_source_types: ['payroll'],
+    payroll_income: {
+      flow_types: ['payroll_document_income'],
+      parsing_config: ['ocr', 'risk_signals'],
+    },
+  },
+};
+
+const BANK_LINK_PARAMS = {
+  income_verification: {
+    income_source_types: ['bank'],
+    bank_income: {
+      days_requested: 180,
+    },
+  },
+};
+
+const PAYROLL_SANDBOX_PARAMS = {
+  institution_id: 'ins_135842',
+};
+
+const BANK_SANDBOX_PARAMS = {
+  options: {
+    override_username: 'user_bank_income',
+    override_password: '{}',
+  },
+};
+
+function incomeLeaf(spec: {
+  id: string;
+  name: string;
+  shortName?: string;
+  flow: IncomeFlow;
+  apiEndpoint: string;
+  apiTitle: string;
+  highlightKeys?: string[];
+  additionalApiParams?: Record<string, any>;
+  hideFromLanding?: boolean;
+  postLinkCompanionOf?: string;
+}): ProductConfig {
+  const linkParams =
+    spec.flow === 'bank' ? BANK_LINK_PARAMS : spec.flow === 'document' ? DOCUMENT_LINK_PARAMS : PAYROLL_LINK_PARAMS;
+  const sandboxParams = spec.flow === 'bank' ? BANK_SANDBOX_PARAMS : spec.flow === 'payroll' ? PAYROLL_SANDBOX_PARAMS : undefined;
+  return {
+    id: spec.id,
+    name: spec.name,
+    shortName: spec.shortName || spec.name,
+    products: ['income_verification'],
+    required_if_supported: [],
+    gradient: INCOME_GRADIENT,
+    icon: INCOME_ICON,
+    apiEndpoint: spec.apiEndpoint,
+    apiTitle: spec.apiTitle,
+    highlightKeys: spec.highlightKeys || [],
+    usesUserId: true,
+    incomeFlow: spec.flow,
+    requiresWebhook: true,
+    additionalLinkParams: linkParams,
+    ...(spec.additionalApiParams ? { additionalApiParams: spec.additionalApiParams } : {}),
+    ...(sandboxParams ? { additionalSandboxCreateParams: sandboxParams } : {}),
+    ...(spec.hideFromLanding ? { hideFromLanding: true } : {}),
+    ...(spec.postLinkCompanionOf ? { postLinkCompanionOf: spec.postLinkCompanionOf } : {}),
+  };
 }
 
 export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
@@ -369,6 +452,89 @@ export const PRODUCT_CONFIGS: Record<string, ProductConfig> = {
         ],
       },
     ]
+  },
+  income: {
+    id: 'income',
+    name: 'Income',
+    shortName: 'Income',
+    products: [],
+    required_if_supported: [],
+    gradient: INCOME_GRADIENT,
+    icon: INCOME_ICON,
+    children: [
+      incomeLeaf({
+        id: 'payroll-income',
+        name: 'Payroll Income',
+        shortName: 'Payroll',
+        flow: 'payroll',
+        apiEndpoint: '/api/credit-payroll-income-get',
+        apiTitle: '/credit/payroll_income/get',
+        highlightKeys: ['items'],
+      }),
+      incomeLeaf({
+        id: 'payroll-employment',
+        name: 'Employment',
+        shortName: 'Employment',
+        flow: 'payroll',
+        apiEndpoint: '/api/credit-employment-get',
+        apiTitle: '/credit/employment/get',
+        highlightKeys: ['items'],
+        hideFromLanding: true,
+        postLinkCompanionOf: 'payroll-income',
+      }),
+      incomeLeaf({
+        id: 'bank-income',
+        name: 'Bank Income',
+        shortName: 'Bank',
+        flow: 'bank',
+        apiEndpoint: '/api/credit-bank-income-get',
+        apiTitle: '/credit/bank_income/get',
+        highlightKeys: ['bank_income'],
+        additionalApiParams: { options: { count: 1 } },
+      }),
+      incomeLeaf({
+        id: 'document-income',
+        name: 'Document Income',
+        shortName: 'Document',
+        flow: 'document',
+        apiEndpoint: '/api/credit-sessions-get',
+        apiTitle: '/credit/sessions/get',
+        highlightKeys: ['sessions'],
+      }),
+      incomeLeaf({
+        id: 'document-payroll-income',
+        name: 'Parsed Documents',
+        shortName: 'Parsed Documents',
+        flow: 'document',
+        apiEndpoint: '/api/credit-payroll-income-get',
+        apiTitle: '/credit/payroll_income/get',
+        highlightKeys: ['items'],
+        hideFromLanding: true,
+        postLinkCompanionOf: 'document-income',
+      }),
+      incomeLeaf({
+        id: 'document-bank-statements',
+        name: 'Bank Statements',
+        shortName: 'Bank Statements',
+        flow: 'document',
+        apiEndpoint: '/api/credit-bank-statements-uploads-get',
+        apiTitle: '/credit/bank_statements/uploads/get',
+        highlightKeys: ['items'],
+        hideFromLanding: true,
+        postLinkCompanionOf: 'document-income',
+      }),
+      incomeLeaf({
+        id: 'document-risk-signals',
+        name: 'Risk Signals',
+        shortName: 'Risk Signals',
+        flow: 'document',
+        apiEndpoint: '/api/credit-payroll-income-risk-signals-get',
+        apiTitle: '/credit/payroll_income/risk_signals/get',
+        highlightKeys: ['items'],
+        hideFromLanding: true,
+        postLinkCompanionOf: 'document-income',
+      }),
+    ],
   },
   cra: {
     id: 'cra',
@@ -1061,7 +1227,114 @@ export const isNonCraAccessTokenProduct = (
   if (!cfg?.apiEndpoint) return false;
   if (cfg.isCRA) return false;
   if (cfg.noAccessToken) return false;
+  if (cfg.usesUserId) return false;
   if (cfg.id === 'link' || cfg.id.startsWith('link-')) return false;
   return true;
 };
+
+/**
+ * Link config for the selected Income leaves.
+ * Payroll and Document share one payroll session. Selecting both enables
+ * digital payroll and document upload, and keeps document parsing plus fraud
+ * signals. Bank Income is a separate session and is not merged in.
+ */
+export function incomeVerificationForLeaves(
+  leaves: ProductConfig[]
+): Record<string, unknown> | null {
+  const flows = new Set(leaves.map((leaf) => leaf.incomeFlow).filter((flow): flow is IncomeFlow => !!flow));
+  if (flows.size === 0) return null;
+  if (flows.has('bank')) {
+    if (flows.size > 1) return null;
+    return BANK_LINK_PARAMS;
+  }
+  if (flows.has('payroll') && flows.has('document')) {
+    return {
+      income_verification: {
+        income_source_types: ['payroll'],
+        payroll_income: {
+          flow_types: ['payroll_digital_income', 'payroll_document_income'],
+          parsing_config: ['ocr', 'risk_signals'],
+        },
+      },
+    };
+  }
+  if (flows.has('document')) return DOCUMENT_LINK_PARAMS;
+  if (flows.has('payroll')) return PAYROLL_LINK_PARAMS;
+  return null;
+}
+
+const PAYROLL_DOCUMENT_ONLY =
+  'Payroll and Document Income can only share a Link session with each other.';
+
+/**
+ * Why `candidate` cannot be added to the current wizard selection.
+ * Bank Income can share Link with other Item products. Payroll and Document
+ * Income cannot, and no Income flow can share Link with CRA.
+ */
+export function incomeSelectionConflict(
+  candidate: ProductConfig,
+  selected: ProductConfig[]
+): string | null {
+  const others = selected.filter((leaf) => leaf.id !== candidate.id);
+  const otherIncome = others.filter((leaf) => !!leaf.incomeFlow);
+  const otherPayrollOrDocument = otherIncome.some(
+    (leaf) => leaf.incomeFlow === 'payroll' || leaf.incomeFlow === 'document'
+  );
+  const otherBank = otherIncome.some((leaf) => leaf.incomeFlow === 'bank');
+  const otherCra = others.some((leaf) => !!leaf.isCRA || leaf.id === 'link-upgrade-mode');
+  const otherItem = others.some((leaf) => isNonCraAccessTokenProduct(leaf));
+
+  if (candidate.incomeFlow) {
+    if (otherCra) return 'Income Verification cannot share a Link session with CRA.';
+    if (candidate.incomeFlow === 'bank' && otherPayrollOrDocument) {
+      return 'Bank Income needs its own Link session. It uses a different income source than Payroll and Document Income.';
+    }
+    if (
+      (candidate.incomeFlow === 'payroll' || candidate.incomeFlow === 'document') &&
+      (otherBank || otherItem)
+    ) {
+      return PAYROLL_DOCUMENT_ONLY;
+    }
+  }
+
+  if ((candidate.isCRA || candidate.id === 'link-upgrade-mode') && otherIncome.length > 0) {
+    return 'CRA cannot be combined with Income Verification.';
+  }
+  if (isNonCraAccessTokenProduct(candidate) && otherPayrollOrDocument) {
+    return PAYROLL_DOCUMENT_ONLY;
+  }
+  return null;
+}
+
+/**
+ * Pick the identifier /user/create actually returned.
+ * Current Income uses a `usr_` user_id. Accounts still on the older user API
+ * return a user_token plus a non-usr user_id; those calls must send user_token.
+ */
+export function incomeUserIdentifier(
+  data: { user_id?: unknown; user_token?: unknown },
+  useLegacyUserToken: boolean
+): { userId: string | null; userToken: string | null; usedUserToken: boolean } {
+  const rawUserId = typeof data.user_id === 'string' ? data.user_id.trim() : '';
+  const userId = rawUserId.startsWith('usr_') ? rawUserId : null;
+  const userToken =
+    typeof data.user_token === 'string' && data.user_token.trim() ? data.user_token.trim() : null;
+  if (useLegacyUserToken && userToken) {
+    return { userId: null, userToken, usedUserToken: true };
+  }
+  if (userId) return { userId, userToken: null, usedUserToken: false };
+  if (userToken) return { userId: null, userToken, usedUserToken: true };
+  return { userId: null, userToken: null, usedUserToken: false };
+}
+
+export function userIdentifierParams(args: {
+  userId?: string | null;
+  userToken?: string | null;
+  usedUserToken?: boolean;
+}): { user_id?: string; user_token?: string } {
+  if (args.usedUserToken && args.userToken) return { user_token: args.userToken };
+  if (args.userId) return { user_id: args.userId };
+  if (args.userToken) return { user_token: args.userToken };
+  return {};
+}
 

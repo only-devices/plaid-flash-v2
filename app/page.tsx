@@ -15,7 +15,7 @@ import ArrowButton from '@/components/ArrowButton';
 import IncomeInsightsVisualization from '@/components/IncomeInsightsVisualization';
 import EnrichVisualization from '@/components/EnrichVisualization';
 import PdfResponseViewer from '@/components/PdfResponseViewer';
-import { getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, collectConfigIds, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN, applyNewCraLinkBody, isInstantCraOnly, craReportProductsFromLeaf, craReportGetRequiresReportId, craReportProductKey, buildCraReportCreateRequest, buildCraReportGetRequest, applyClientUserReportId } from '@/lib/productConfig';
+import { getProductConfigById, ProductConfig, collectLeafConfigs, isNonCraAccessTokenProduct, productsForCraMode, collectConfigIds, LEGACY_CRA_CHILDREN, NEW_CRA_CHILDREN, applyNewCraLinkBody, isInstantCraOnly, craReportProductsFromLeaf, craReportGetRequiresReportId, craReportProductKey, buildCraReportCreateRequest, buildCraReportGetRequest, applyClientUserReportId, incomeVerificationForLeaves, incomeSelectionConflict, incomeUserIdentifier, userIdentifierParams } from '@/lib/productConfig';
 import { generateClientUserId } from '@/lib/generateClientUserId';
 import { extractPublicTokensFromLinkTokenGet } from '@/lib/linkTokenGetPublicTokens';
 import {
@@ -475,9 +475,18 @@ export default function Home() {
           reason: 'Configure a webhook URL in settings first.',
         };
       }
+
+      if (cfg && !demoProductsVisibility[productId]) {
+        const selected = Object.keys(demoProductsVisibility)
+          .filter((id) => demoProductsVisibility[id])
+          .map((id) => getProductConfigById(id))
+          .filter((leaf): leaf is ProductConfig => !!leaf);
+        const reason = incomeSelectionConflict(cfg, selected);
+        if (reason) return { disabled: true, reason };
+      }
       return { disabled: false as const };
     },
-    [effectiveWebhookConfigUrl, layerFlowEnabled, layerMode, useLegacyUserToken]
+    [demoProductsVisibility, effectiveWebhookConfigUrl, layerFlowEnabled, layerMode, useLegacyUserToken]
   );
 
   // Build the Configuration Wizard's card-and-pills structure from the
@@ -1046,8 +1055,8 @@ export default function Home() {
       return;
     }
 
-    // For CRA products, Multi-item Link, or when "Always /user/create" is on, show user create modal first
-    if (productConfig.isCRA || multiItemLinkEnabled || alwaysUserCreate) {
+    // For CRA, Income, Multi-item Link, or when "Always /user/create" is on, show user create modal first
+    if (productConfig.isCRA || productConfig.usesUserId || multiItemLinkEnabled || alwaysUserCreate) {
       showUserCreatePreview(productId);
       return;
     }
@@ -1217,6 +1226,26 @@ export default function Home() {
     }
 
     setProductApiConfig(requestBody);
+    setModalState('preview-product-api');
+    setShowModal(true);
+  };
+
+  const openIncomeProductPreview = (productConfig: ProductConfig) => {
+    const baseParams = userIdentifierParams({ userId, userToken, usedUserToken });
+    if (!baseParams.user_id && !baseParams.user_token) {
+      setErrorData({
+        error: 'MISSING_USER',
+        message: 'Missing user_id for this Income call. Create a Plaid user before retrieving results.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      return;
+    }
+    setProductApiConfig(buildProductRequestBody(baseParams, productConfig));
+    setIsEditingProductApiConfig(false);
+    setEditedProductApiConfig('');
+    setProductApiConfigError(null);
     setModalState('preview-product-api');
     setShowModal(true);
   };
@@ -1409,7 +1438,22 @@ export default function Home() {
           setClientUserId(userCreateClientUserId);
         }
 
-        if (reportApiUser) {
+        const sandboxProducts = Array.isArray(pendingSandbox.initial_products)
+          ? pendingSandbox.initial_products
+          : [];
+        if (sandboxProducts.includes('income_verification')) {
+          const incomeUser = incomeUserIdentifier(data, useLegacyUserToken);
+          delete pendingSandbox.user_id;
+          delete pendingSandbox.user_token;
+          setUserId(incomeUser.userId);
+          setUserToken(incomeUser.userToken);
+          setUsedUserToken(incomeUser.usedUserToken);
+          if (incomeUser.usedUserToken && incomeUser.userToken) {
+            pendingSandbox.user_token = incomeUser.userToken;
+          } else if (incomeUser.userId) {
+            pendingSandbox.user_id = incomeUser.userId;
+          }
+        } else if (reportApiUser) {
           delete pendingSandbox.user_token;
           if (newUserId) {
             pendingSandbox.user_id = newUserId;
@@ -1456,6 +1500,29 @@ export default function Home() {
           if (newUserId) {
             pendingCfg.user_id = newUserId;
             setUsedUserToken(false);
+          }
+        } else if (pendingCfg.income_verification) {
+          const incomeUser = incomeUserIdentifier(data, useLegacyUserToken);
+          if (!incomeUser.userId && !incomeUser.userToken) {
+            setErrorData({
+              error: 'MISSING_USER',
+              message: '/user/create did not return a usr_ user_id or a user_token for Income.',
+            });
+            setApiStatusCode(400);
+            setModalState('api-error');
+            setShowModal(true);
+            return;
+          }
+          setUserId(incomeUser.userId);
+          setUserToken(incomeUser.userToken);
+          setUsedUserToken(incomeUser.usedUserToken);
+          if (incomeUser.usedUserToken && incomeUser.userToken) {
+            delete pendingCfg.user_id;
+            pendingCfg.user_token = incomeUser.userToken;
+          } else if (incomeUser.userId) {
+            delete pendingCfg.user;
+            delete pendingCfg.user_token;
+            pendingCfg.user_id = incomeUser.userId;
           }
         } else if (useLegacyUserToken && newUserToken) {
           pendingCfg.user_token = newUserToken;
@@ -1685,6 +1752,9 @@ export default function Home() {
         linkConfig.user_id = effectiveUserId;
         setUsedUserToken(false);
       }
+    } else if (productConfig.usesUserId && !useLegacyUserToken && linkConfig.user_id) {
+      delete linkConfig.user;
+      delete linkConfig.user_token;
     }
 
     setLinkTokenConfig(linkConfig);
@@ -2545,7 +2615,7 @@ export default function Home() {
         // Internal-only: always force the current session access_token for non-CRA.
         // Skip entirely for leaves marked `noAccessToken` (e.g. /transactions/enrich)
         // since they don't operate on a Plaid Item.
-        if (!productConfig.isCRA && !productConfig.noAccessToken) {
+        if (!productConfig.isCRA && !productConfig.noAccessToken && !productConfig.usesUserId) {
           if (!tokenToUse) throw new Error('Missing access_token for product API call');
           bodyToSend.access_token = tokenToUse;
         }
@@ -2630,7 +2700,7 @@ export default function Home() {
       // Internal-only: always force the current session access_token for non-CRA.
       // Skip entirely for leaves marked `noAccessToken` (e.g. /transactions/enrich)
       // since they don't operate on a Plaid Item.
-      if (!productConfig.isCRA && !productConfig.noAccessToken) {
+      if (!productConfig.isCRA && !productConfig.noAccessToken && !productConfig.usesUserId) {
         if (!tokenToUse) throw new Error('Missing access_token for product API call');
         bodyToSend.access_token = tokenToUse;
       }
@@ -2791,7 +2861,9 @@ export default function Home() {
       setSelectedGrandchildProduct(null);
       setEditedProductApiConfig('');
       setShowProductModal(true);
-    } else if (productConfig?.isCRA) {
+    } else if (productConfig?.usesUserId && demoLinkCompleted) {
+      returnToPostLinkProductPicker();
+    } else if (productConfig?.isCRA || productConfig?.usesUserId) {
       // CRA products: go back to callback-success modal
       setModalState('callback-success');
       setShowModal(true);
@@ -3131,6 +3203,40 @@ export default function Home() {
     setShowModal(true);
 
     try {
+      const zapProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
+      const zapProductConfig = zapProductId ? getProductConfigById(zapProductId) : undefined;
+      if (zapProductConfig?.usesUserId) {
+        if (!zapProductConfig.apiEndpoint) {
+          throw new Error('Product API endpoint not configured');
+        }
+        const baseParams = userIdentifierParams({ userId, userToken, usedUserToken });
+        if (!baseParams.user_id && !baseParams.user_token) {
+          throw new Error('Missing user_id/user_token for Income');
+        }
+        setModalState('processing-product');
+        const requestBody = buildProductRequestBody(baseParams, zapProductConfig);
+        const productResponse = await fetch(zapProductConfig.apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        const zapProductData = await productResponse.json();
+        if (productResponse.status >= 400) {
+          setErrorData(zapProductData);
+          setApiStatusCode(productResponse.status);
+          setModalState('api-error');
+          setShowModal(true);
+          return;
+        }
+        setProductData(zapProductData);
+        setApiStatusCode(productResponse.status);
+        setZapMobileStep('product');
+        setModalState('zap-mode-results');
+        setShowModal(false);
+        setShowZapResetButton(true);
+        return;
+      }
+
       // Exchange public_token for access_token (skipped under Update Mode,
       // where the user already supplied an access_token via the input modal).
       const exchangeResult = await exchangeOrReuseAccessToken(public_token);
@@ -3223,7 +3329,7 @@ export default function Home() {
       setModalState('error');
       setShowModal(true);
     }
-  }, [selectedProduct, selectedChildProduct]);
+  }, [selectedProduct, selectedChildProduct, selectedGrandchildProduct, userId, userToken, usedUserToken]);
 
   // Bypass Link Mode Handlers
   const handleProceedWithBypassLink = async (sandboxConfigOverride?: any) => {
@@ -3671,8 +3777,14 @@ export default function Home() {
     // API preview (no manual USER_CHECK_REPORT_READY paste step).
     if (demoMode && !demoLinkCompleted && !isLayerCallback) {
       const public_token = proceedPublicToken || '';
+      const { selectedLeafConfigs } = resolveSelectedLinkProducts();
+      const needsItemAccessToken = selectedLeafConfigs.some((leaf) => isNonCraAccessTokenProduct(leaf));
+      const incomeWithoutItem =
+        selectedLeafConfigs.some((leaf) => !!leaf.usesUserId) && !needsItemAccessToken;
 
-      if (!public_token) {
+      // Payroll and Document Income (and Bank Income on its own) retrieve with
+      // user_id. onSuccess is not the signal that those results are ready.
+      if (!public_token || incomeWithoutItem) {
         setDemoLinkCompleted(true);
         setShowModal(false);
         setShowProductModal(true);
@@ -4340,6 +4452,11 @@ export default function Home() {
         return;
       }
 
+      if (productConfig.usesUserId) {
+        openIncomeProductPreview(productConfig);
+        return;
+      }
+
       // In Demo Mode, we may need to call /accounts/get first for some products
       // Check if we should skip accounts/get (same logic as normal mode)
       const skipAccountsGet = productId === 'signal-balance';
@@ -4907,12 +5024,17 @@ export default function Home() {
         mergedAdditionalLinkParams = { ...mergedAdditionalLinkParams, ...leaf.additionalLinkParams };
       }
     }
+    const incomeLinkParams = incomeVerificationForLeaves(selectedLeafConfigs);
+    if (incomeLinkParams) {
+      mergedAdditionalLinkParams = { ...mergedAdditionalLinkParams, ...incomeLinkParams };
+    }
     const products = Array.from(productsSet);
     const includesCra =
       products.some((p) => p.startsWith('cra_')) ||
       selectedLeafConfigs.some((c) => !!c.isCRA && !c.instantCra);
+    const includesIncome = selectedLeafConfigs.some((c) => !!c.usesUserId);
 
-    return { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra };
+    return { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra, includesIncome };
   };
 
   // Update Mode bypasses the public_token -> access_token exchange because
@@ -5008,7 +5130,7 @@ export default function Home() {
       return;
     }
 
-    const { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra } =
+    const { selectedLeafConfigs, products, mergedAdditionalLinkParams, includesCra, includesIncome } =
       resolveSelectedLinkProducts();
 
     // Instant Link skips Link entirely: create the user, then call /cra/report/get.
@@ -5020,11 +5142,23 @@ export default function Home() {
       return;
     }
 
-    // CRA in Demo Mode requires a webhook URL (so we can wait for readiness later)
-    if (includesCra && !effectiveWebhookConfigUrl) {
+    // CRA and Income require a webhook URL (results are ready only after the webhook)
+    if ((includesCra || includesIncome) && !effectiveWebhookConfigUrl) {
       setErrorData({
         error: 'WEBHOOK_URL_REQUIRED',
-        message: 'Configure a webhook URL in Settings before starting Demo Mode with CRA products.',
+        message: 'Configure a webhook URL in Settings before starting with CRA or Income products.',
+      });
+      setApiStatusCode(400);
+      setModalState('api-error');
+      setShowModal(true);
+      setShowWelcome(false);
+      return;
+    }
+
+    if (bypassLink && selectedLeafConfigs.some((leaf) => leaf.incomeFlow === 'document')) {
+      setErrorData({
+        error: 'DOCUMENT_INCOME_REQUIRES_LINK',
+        message: 'Document Income uploads files inside Link. Turn off Bypass Link to continue.',
       });
       setApiStatusCode(400);
       setModalState('api-error');
@@ -5074,7 +5208,7 @@ export default function Home() {
 
       setIsDemoModeStarting(true);
 
-      if (includesCra || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
+      if (includesCra || includesIncome || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
         // /user/create first so we can include user_id/user_token in the
         // sandbox config. The sandbox preview modal opens from
         // handleProceedWithUserCreate's demoPendingSandboxConfig branch.
@@ -5138,7 +5272,7 @@ export default function Home() {
     // Set flag that we're starting demo mode
     setIsDemoModeStarting(true);
 
-    if (includesCra || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
+    if (includesCra || includesIncome || alwaysUserCreate || selectedLeafConfigs.some((leaf) => leaf.instantCra)) {
       // /user/create first so we can include user_id/user_token in /link/token/create
       const leafForUserCreate =
         selectedLeafConfigs.find((c) => c.isCRA && !c.instantCra) ||
@@ -5246,43 +5380,33 @@ export default function Home() {
     const tokenToRemove = accessToken || demoAccessToken;
     const hasItemToRemove = !!tokenToRemove;
     const hasUserToRemove = !!(userId || userToken);
+    const includesIncome = Object.keys(demoProductsVisibility).some(
+      (id) => !!demoProductsVisibility[id] && !!getProductConfigById(id)?.usesUserId
+    );
+    const removeUser = shouldRemoveBothForHybrid || !!productConfig?.isCRA || isUpgradeMode || includesIncome;
+    const removeItem =
+      shouldRemoveBothForHybrid ||
+      includesIncome ||
+      (!productConfig?.isCRA && !isUpgradeMode && !includesIncome);
 
-    if (
-      (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
-      (!shouldRemoveBothForHybrid && (productConfig?.isCRA || isUpgradeMode) && hasUserToRemove) ||
-      (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
-    ) {
+    if ((removeUser && hasUserToRemove) || (removeItem && hasItemToRemove)) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       
       try {
-        if (shouldRemoveBothForHybrid) {
-          if (hasItemToRemove) {
-            await fetch('/api/item-remove', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ access_token: tokenToRemove }),
-            });
-          }
-          if (hasUserToRemove) {
-            await fetch('/api/user-remove', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ user_id: userId, user_token: userToken }),
-            });
-          }
-        } else if (productConfig?.isCRA || isUpgradeMode) {
-          await fetch('/api/user-remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, user_token: userToken }),
-          });
-        } else {
+        if (removeItem && hasItemToRemove) {
           await fetch('/api/item-remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ access_token: tokenToRemove }),
+          });
+        }
+        if (removeUser && hasUserToRemove) {
+          await fetch('/api/user-remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, user_token: userToken }),
           });
         }
       } catch (error) {
@@ -5488,44 +5612,34 @@ export default function Home() {
 
     const hasItemToRemove = !!accessToken;
     const hasUserToRemove = !!(userId || userToken);
+    const includesIncome = Object.keys(demoProductsVisibility).some(
+      (id) => !!demoProductsVisibility[id] && !!getProductConfigById(id)?.usesUserId
+    );
+    const removeUser = shouldRemoveBothForHybrid || !!productConfig?.isCRA || isUpgradeMode || includesIncome;
+    const removeItem =
+      shouldRemoveBothForHybrid ||
+      includesIncome ||
+      (!productConfig?.isCRA && !isUpgradeMode && !includesIncome);
 
-    if (
-      (shouldRemoveBothForHybrid && (hasItemToRemove || hasUserToRemove)) ||
-      (!shouldRemoveBothForHybrid && (productConfig?.isCRA || isUpgradeMode) && hasUserToRemove) ||
-      (!shouldRemoveBothForHybrid && !productConfig?.isCRA && hasItemToRemove)
-    ) {
+    if ((removeUser && hasUserToRemove) || (removeItem && hasItemToRemove)) {
       // Show tidying up message
       setModalState('tidying-up');
       setShowModal(true);
       setShowZapResetButton(false);
       
       try {
-        if (shouldRemoveBothForHybrid) {
-          if (hasItemToRemove) {
-            await fetch('/api/item-remove', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ access_token: accessToken }),
-            });
-          }
-          if (hasUserToRemove) {
-            await fetch('/api/user-remove', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ user_id: userId, user_token: userToken }),
-            });
-          }
-        } else if (productConfig?.isCRA || isUpgradeMode) {
-          await fetch('/api/user-remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, user_token: userToken }),
-          });
-        } else {
+        if (removeItem && hasItemToRemove) {
           await fetch('/api/item-remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ access_token: accessToken }),
+          });
+        }
+        if (removeUser && hasUserToRemove) {
+          await fetch('/api/user-remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, user_token: userToken }),
           });
         }
       } catch (error) {
@@ -5941,6 +6055,19 @@ export default function Home() {
 
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
+
+      if (demoMode && !demoLinkCompleted) {
+        const { selectedLeafConfigs } = resolveSelectedLinkProducts();
+        const needsItemAccessToken = selectedLeafConfigs.some((leaf) => isNonCraAccessTokenProduct(leaf));
+        const incomeWithoutItem =
+          selectedLeafConfigs.some((leaf) => !!leaf.usesUserId) && !needsItemAccessToken;
+        if (incomeWithoutItem) {
+          setDemoLinkCompleted(true);
+          setShowModal(false);
+          setShowProductModal(true);
+          return;
+        }
+      }
 
       // Hybrid: exchange (use first public_token) then run the hybrid queue
       if (hybridModeActive) {
@@ -7348,7 +7475,12 @@ export default function Home() {
       const effectiveProductId = selectedGrandchildProduct || selectedChildProduct || selectedProduct;
       const productConfig = effectiveProductId ? getProductConfigById(effectiveProductId) : undefined;
       const isUpdateMode = effectiveProductId === 'link-update-mode';
-      const allowForwardWithoutTokens = (isUpdateMode || !!productConfig?.isCRA) && !hybridModeActive;
+      const hostedLeaves = resolveSelectedLinkProducts().selectedLeafConfigs;
+      const incomeWithoutItem =
+        hostedLeaves.some((leaf) => !!leaf.usesUserId) &&
+        !hostedLeaves.some((leaf) => isNonCraAccessTokenProduct(leaf));
+      const allowForwardWithoutTokens =
+        (isUpdateMode || !!productConfig?.isCRA || incomeWithoutItem) && !hybridModeActive;
 
       return (
         <div className="modal-success">
@@ -7659,6 +7791,14 @@ export default function Home() {
                 </select>
               )}
             </div>
+            {productConfig?.incomeFlow && !isEditingProductApiConfig && (
+              <p className="product-wizard-subtitle" style={{ margin: '0 0 12px' }}>
+                Link success does not mean Income results are ready. Wait for the Income webhook, then continue.
+                {productConfig.incomeFlow === 'document'
+                  ? ' Risk signals wait for INCOME / USER_INCOME_VERIFICATION_RISK_SIGNALS.'
+                  : ' Retry if processing is still in progress.'}
+              </p>
+            )}
             {!isEditingProductApiConfig ? (
               <>
                 <div className="account-data config-data-with-edit">
